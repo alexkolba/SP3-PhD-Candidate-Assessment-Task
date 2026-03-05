@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Results — MedEval{% endblock %}
+{% block content %}
+
+<div class="results-page">
+  <div class="results-header">
+    <h1 class="results-title">Annotation Results</h1>
+    <div class="results-actions">
+      <a href="/api/export" class="btn-outline" target="_blank">↓ Export JSON</a>
+    </div>
+  </div>
+
+  {% if not feedback %}
+  <div class="empty-state">
+    <span class="empty-icon">◇</span>
+    <p>No annotations yet.</p>
+    <a href="/" class="btn-primary">Start annotating →</a>
+  </div>
+  {% else %}
+
+  <div class="results-summary">
+    <div class="summary-chip">{{ feedback | length }} annotations</div>
+    <div class="summary-chip">{{ total_cases }} cases total</div>
+    <div class="summary-chip">{{ ((feedback | length / total_cases) * 100) | int }}% complete</div>
+  </div>
+
+  <div class="results-table-wrap">
+    <table class="results-table">
+      <thead>
+        <tr>
+          <th>Case</th>
+          <th>Specialty</th>
+          <th>Type</th>
+          <th>Result</th>
+          <th>Flags</th>
+          <th>Time on task</th>
+          <th>Annotator</th>
+          <th>Timestamp</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for f in feedback | sort(attribute='timestamp', reverse=True) %}
+        <tr>
+          <td><a href="/case/{{ f.case_id }}" class="result-case-link">{{ f.case_id }}</a></td>
+          <td><span class="specialty-badge">{{ f.specialty }}</span></td>
+          <td><span class="type-badge type-{{ f.type }}">{{ f.type }}</span></td>
+          <td class="result-cell">
+            {% if f.type == 'comparison' %}
+              Preferred: <strong>Model {{ ['A','B','C','D'][f.preferred | int] if f.preferred is not none else '—' }}</strong>
+            {% elif f.type == 'rating' %}
+              <details>
+                <summary>View ratings</summary>
+                <div class="rating-detail">
+                  {% for model_idx, dims in f.ratings.items() %}
+                  <div>Model {{ ['A','B','C','D'][model_idx | int] }}:
+                    {% for dim, val in dims.items() %}<span class="dim-val">{{ dim }}: {{ val }}/5</span>{% endfor %}
+                  </div>
+                  {% endfor %}
+                </div>
+              </details>
+            {% elif f.type == 'ranking' %}
+              {% if f.ranking %}
+              {% for idx in f.ranking if idx is not none %}Model {{ ['A','B','C'][idx | int] }}{% if not loop.last %} → {% endif %}{% endfor %}
+              {% else %}—{% endif %}
+            {% endif %}
+          </td>
+          <td>
+            {% if f.flags %}
+              {% for flag in f.flags %}
+              <span class="flag-tag">{{ flag }}</span>
+              {% endfor %}
+            {% else %}—{% endif %}
+          </td>
+          <td>{{ f.time_on_task_seconds }}s</td>
+          <td><code class="annotator-code">{{ f.annotator_id }}</code></td>
+          <td class="ts-cell">{{ f.timestamp[:19].replace('T',' ') }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

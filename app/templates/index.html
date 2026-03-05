@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}Annotation Queue — MedEval{% endblock %}
+{% block content %}
+
+<div class="hero">
+  <div class="hero-left">
+    <p class="hero-eyebrow">Preference Optimisation · Data Collection</p>
+    <h1 class="hero-title">Clinical Output<br><em>Evaluation Queue</em></h1>
+    <p class="hero-desc">Rate, rank, and compare LLM-generated clinical responses to build preference datasets for RLHF fine-tuning.</p>
+  </div>
+  <div class="stats-grid">
+    <div class="stat-card">
+      <span class="stat-num">{{ completed }}</span>
+      <span class="stat-label">Completed</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-num">{{ total - completed }}</span>
+      <span class="stat-label">Pending</span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-num">{{ total }}</span>
+      <span class="stat-label">Total Cases</span>
+    </div>
+    <div class="stat-card accent">
+      {% if total > 0 %}
+      <span class="stat-num">{{ ((completed / total) * 100) | int }}%</span>
+      {% else %}
+      <span class="stat-num">0%</span>
+      {% endif %}
+      <span class="stat-label">Progress</span>
+    </div>
+  </div>
+</div>
+
+<div class="progress-bar-wrap">
+  <div class="progress-bar" style="width: {{ ((completed / total) * 100) if total > 0 else 0 }}%"></div>
+</div>
+
+<section class="cases-section">
+  <h2 class="section-title">All Cases</h2>
+  <div class="cases-grid">
+    {% for case in cases %}
+    {% set is_done = case.id not in (pending | map(attribute='id') | list) %}
+    <a href="/case/{{ case.id }}" class="case-card {% if is_done %}case-done{% endif %}">
+      <div class="case-header">
+        <span class="case-specialty">{{ case.specialty }}</span>
+        <span class="case-type-badge type-{{ case.type }}">{{ case.type }}</span>
+        {% if is_done %}<span class="done-badge">✓ Done</span>{% endif %}
+      </div>
+      <p class="case-prompt">{{ case.prompt[:140] }}…</p>
+      <div class="case-footer">
+        <span class="case-outputs-count">{{ case.outputs | length }} model output{{ 's' if case.outputs | length > 1 }}</span>
+        <span class="case-arrow">→</span>
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+</section>
+
+{% if completed > 0 %}
+<div class="reset-row">
+  <button class="btn-ghost-danger" onclick="resetAll()">↺ Reset all feedback</button>
+</div>
+{% endif %}
+
+<script>
+function resetAll() {
+  if (!confirm('Delete all saved feedback and start over?')) return;
+  fetch('/api/reset', { method: 'POST' })
+    .then(() => location.reload());
+}
+</script>
+{% endblock %}

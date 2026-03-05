@@ -1,0 +1,21 @@
+version: "3.9"
+
+services:
+  medeval:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    volumes:
+      - medeval_data:/data
+      - ./cases:/cases:ro
+    environment:
+      - FLASK_ENV=production
+      - SECRET_KEY=change-this-to-a-long-random-string
+      - ADMIN_INVITE_CODE=admin1234
+    restart: unless-stopped
+
+volumes:
+  medeval_data:
+    driver: local

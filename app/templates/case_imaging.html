@@ -1,0 +1,424 @@
+{% extends "base.html" %}
+{% block title %}{{ case.specialty }} — {{ case.modality }} — MedEval{% endblock %}
+
+{% block content %}
+<div class="case-page">
+
+  <div class="case-breadcrumb">
+    <a href="/" class="back-link">← Queue</a>
+    <span class="crumb-sep">/</span>
+    <span class="crumb-specialty">{{ case.specialty }}</span>
+    <span class="crumb-sep">/</span>
+    <span class="crumb-type">{{ case.modality }}</span>
+  </div>
+
+  <div class="case-prompt-block">
+    <div class="prompt-label"><span class="prompt-icon">⬡</span> Clinical Prompt</div>
+    <p class="prompt-text">{{ case.prompt }}</p>
+  </div>
+
+  {# ── Model selector tabs ──────────────────────────────────────── #}
+  <div class="viewer-shell">
+    <div class="model-tabs">
+      {% for output in case.outputs %}
+      <button
+        class="model-tab {% if loop.first %}tab-active{% endif %}"
+        data-model-idx="{{ loop.index0 }}"
+        style="--tab-color: {{ output.color }}"
+        onclick="switchModel({{ loop.index0 }})">
+        <span class="tab-model-label">{{ output.label }}</span>
+        <span class="tab-model-name">{{ output.model }}</span>
+      </button>
+      {% endfor %}
+      <button class="model-tab tab-compare" onclick="switchModel('compare')">
+        <span class="tab-model-label">⇄</span>
+        <span class="tab-model-name">Side by side</span>
+      </button>
+    </div>
+
+    {# ── Single-model view ──────────────────────────────────────── #}
+    <div id="singleView" class="viewer-layout">
+      <div class="ct-viewer-wrap" id="ctViewerSingle">
+        <canvas id="ctCanvasSingle" class="ct-canvas"></canvas>
+        <div class="slice-overlay">
+          <span id="sliceCounterSingle" class="slice-counter">1 / {{ case.slices | length }}</span>
+          <span id="confBadgeSingle" class="conf-badge hidden"></span>
+        </div>
+        <div class="scroll-hint">↕ scroll or drag slider</div>
+      </div>
+      <div class="viewer-sidebar">
+        <div class="slice-slider-wrap">
+          <span class="slider-label">Z</span>
+          <input type="range" id="sliderSingle" class="slice-slider"
+            min="0" max="{{ case.slices | length - 1 }}" value="0"
+            oninput="goToSlice(parseInt(this.value))">
+          <span class="slider-label">{{ case.slices | length }}</span>
+        </div>
+        <div class="report-panel" id="reportPanelSingle"></div>
+      </div>
+    </div>
+
+    {# ── Side-by-side view ──────────────────────────────────────── #}
+    <div id="compareView" class="compare-layout hidden">
+      {% for output in case.outputs %}
+      <div class="compare-col">
+        <div class="compare-col-header" style="--tab-color: {{ output.color }}">
+          <span>{{ output.label }}</span>
+          <span class="compare-model-name">{{ output.model }}</span>
+          <span class="compare-conf-badge" id="confBadgeCompare{{ loop.index0 }}"></span>
+        </div>
+        <div class="ct-viewer-wrap">
+          <canvas id="ctCanvasCompare{{ loop.index0 }}" class="ct-canvas ct-canvas-compare"></canvas>
+          <div class="slice-overlay">
+            <span class="slice-counter" id="sliceCounterCompare{{ loop.index0 }}">1 / {{ case.slices | length }}</span>
+          </div>
+        </div>
+        <div class="compare-report">{{ output.report }}</div>
+      </div>
+      {% endfor %}
+      <div class="compare-slider-row">
+        <span class="slider-label">Z</span>
+        <input type="range" id="sliderCompare" class="slice-slider"
+          min="0" max="{{ case.slices | length - 1 }}" value="0"
+          oninput="goToSlice(parseInt(this.value))">
+        <span class="slider-label">{{ case.slices | length }}</span>
+      </div>
+    </div>
+  </div>
+
+  {# ── Feedback form ────────────────────────────────────────────── #}
+  <div class="feedback-form">
+    <h3 class="form-section-title">Evaluation</h3>
+
+    {# Per-model feedback panels #}
+    <div class="per-model-feedback">
+      {% for output in case.outputs %}
+      {% set mi = loop.index0 %}
+      <div class="model-feedback-panel" style="--tab-color: {{ output.color }}">
+        <div class="model-feedback-header">
+          <span class="model-feedback-label">{{ output.label }}</span>
+          <span class="model-feedback-name">{{ output.model }}</span>
+        </div>
+        <div class="flag-group">
+          <p class="flag-label">Flag issues:</p>
+          <div class="flag-chips">
+            {% for flag in ['Wrong localisation', 'Missed lesion', 'False positive', 'Incorrect size estimate', 'Wrong diagnosis', 'Hallucination in report'] %}
+            <button class="flag-chip" data-model="{{ mi }}" data-flag="{{ flag }}" onclick="toggleFlag(this)">{{ flag }}</button>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="comment-group" style="margin-top:.9rem">
+          <label class="comment-label">Comments <span class="optional">(optional)</span></label>
+          <textarea id="comments_{{ mi }}" class="comment-input" rows="2" placeholder="Bounding box accuracy, report quality, missed findings…"></textarea>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    {# Overall preference #}
+    <div class="imaging-pref-group" style="margin-top:1.5rem">
+      <p class="flag-label">Overall preference:</p>
+      <div class="imaging-pref-btns">
+        {% for output in case.outputs %}
+        <button
+          class="imaging-pref-btn"
+          data-idx="{{ loop.index0 }}"
+          style="--tab-color: {{ output.color }}"
+          onclick="selectImagePreferred({{ loop.index0 }}, this)">
+          {{ output.label }} — {{ output.model }}
+        </button>
+        {% endfor %}
+        <button class="imaging-pref-btn" data-idx="-1" onclick="selectImagePreferred(-1, this)">
+          Equivalent / Cannot decide
+        </button>
+      </div>
+    </div>
+
+    <div class="annotator-group" style="margin-top:1.1rem">
+      <label for="annotatorId" class="comment-label">Annotator ID</label>
+      <input type="text" id="annotatorId" class="annotator-input" placeholder="e.g. dr_smith">
+    </div>
+
+    <div class="form-actions">
+      <a href="/" class="btn-secondary">Cancel</a>
+      <button class="btn-primary" id="submitBtn" onclick="submitFeedback()">Save Feedback →</button>
+    </div>
+    <div id="submitMsg" class="submit-msg hidden"></div>
+  </div>
+
+</div>
+
+{# ── Pass data to JS ────────────────────────────────────────────── #}
+<script>
+const CASE_ID    = {{ case.id | tojson }};
+const CASE_TYPE  = "comparison";
+const SLICES     = {{ case.slices | tojson }};
+const FOLDER     = {{ case.case_folder | tojson }};
+const OUTPUTS    = {{ case.outputs | tojson }};
+const NUM_MODELS = OUTPUTS.length;
+const startTime  = Date.now();
+const EXISTING   = {{ existing | tojson if existing else 'null' }};
+
+// ── State ───────────────────────────────────────────────────────────────────
+let currentSlice = 0;
+let activeModel  = 0;   // or 'compare'
+let preferred    = null;
+// per-model: { 0: { flags: [], comments: "" }, 1: { flags: [], comments: "" } }
+let modelFeedback = Object.fromEntries(OUTPUTS.map((_, i) => [i, { flags: [], comments: "" }]));
+let images       = [];  // loaded Image objects
+
+// ── Image preload ────────────────────────────────────────────────────────────
+function preloadImages() {
+  return Promise.all(SLICES.map((fname, i) => {
+    return new Promise(res => {
+      const img = new Image();
+      img.onload = () => { images[i] = img; res(); };
+      img.onerror = () => res();
+      img.src = `/cases/${FOLDER}/${fname}`;
+    });
+  }));
+}
+
+// ── Canvas drawing ───────────────────────────────────────────────────────────
+function drawSlice(canvas, sliceIdx, modelIdx) {
+  const img = images[sliceIdx];
+  if (!img) return;
+
+  const size = canvas.parentElement.clientWidth || 520;
+  canvas.width  = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+
+  // Draw CT image
+  ctx.drawImage(img, 0, 0, size, size);
+
+  // Draw bounding box overlay
+  const model   = OUTPUTS[modelIdx];
+  const det     = model.detections[String(sliceIdx)];
+  const color   = model.color;
+
+  if (det) {
+    const dist  = 0; // distance from primary slice for fade calc
+    const alpha = det.conf;  // full opacity = confidence
+
+    const x = det.x * size;
+    const y = det.y * size;
+    const w = det.w * size;
+    const h = det.h * size;
+
+    // Glow effect
+    ctx.shadowColor = color;
+    ctx.shadowBlur  = 12;
+
+    // Box stroke
+    ctx.strokeStyle = hexToRgba(color, alpha);
+    ctx.lineWidth   = 2.5;
+    ctx.strokeRect(x, y, w, h);
+    ctx.shadowBlur  = 0;
+
+    // Corner ticks
+    const tick = 12;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 3;
+    [[x,y],[x+w,y],[x,y+h],[x+w,y+h]].forEach(([cx,cy]) => {
+      const dx = cx === x ? 1 : -1;
+      const dy = cy === y ? 1 : -1;
+      ctx.beginPath();
+      ctx.moveTo(cx, cy + dy*tick); ctx.lineTo(cx, cy); ctx.lineTo(cx + dx*tick, cy);
+      ctx.stroke();
+    });
+
+    // Label pill
+    const label  = `${model.label}  ${(det.conf * 100).toFixed(0)}%`;
+    const fsize  = Math.max(11, size * 0.022);
+    ctx.font     = `600 ${fsize}px "DM Mono", monospace`;
+    const tw     = ctx.measureText(label).width;
+    const ph     = fsize + 8, pw = tw + 16;
+    const lx     = x, ly = y - ph - 4;
+
+    ctx.fillStyle = hexToRgba(color, 0.9);
+    roundRect(ctx, lx, ly, pw, ph, 3);
+    ctx.fill();
+
+    ctx.fillStyle = '#0c0d10';
+    ctx.fillText(label, lx + 8, ly + ph - 6);
+  }
+}
+
+function hexToRgba(hex, a) {
+  const r = parseInt(hex.slice(1,3),16);
+  const g = parseInt(hex.slice(3,5),16);
+  const b = parseInt(hex.slice(5,7),16);
+  return `rgba(${r},${g},${b},${a})`;
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.lineTo(x+w-r, y); ctx.arcTo(x+w,y, x+w,y+r, r);
+  ctx.lineTo(x+w, y+h-r); ctx.arcTo(x+w,y+h, x+w-r,y+h, r);
+  ctx.lineTo(x+r, y+h); ctx.arcTo(x,y+h, x,y+h-r, r);
+  ctx.lineTo(x, y+r); ctx.arcTo(x,y, x+r,y, r);
+  ctx.closePath();
+}
+
+// ── Render current state ─────────────────────────────────────────────────────
+function render() {
+  if (activeModel === 'compare') {
+    OUTPUTS.forEach((_, mi) => {
+      const canvas = document.getElementById(`ctCanvasCompare${mi}`);
+      if (canvas) drawSlice(canvas, currentSlice, mi);
+      updateConfBadge(`confBadgeCompare${mi}`, currentSlice, mi);
+      const ctr = document.getElementById(`sliceCounterCompare${mi}`);
+      if (ctr) ctr.textContent = `${currentSlice + 1} / ${SLICES.length}`;
+    });
+    const sl = document.getElementById('sliderCompare');
+    if (sl) sl.value = currentSlice;
+  } else {
+    const canvas = document.getElementById('ctCanvasSingle');
+    if (canvas) drawSlice(canvas, currentSlice, activeModel);
+    updateConfBadge('confBadgeSingle', currentSlice, activeModel);
+    const ctr = document.getElementById('sliceCounterSingle');
+    if (ctr) ctr.textContent = `${currentSlice + 1} / ${SLICES.length}`;
+    const sl = document.getElementById('sliderSingle');
+    if (sl) sl.value = currentSlice;
+  }
+}
+
+function updateConfBadge(id, sliceIdx, modelIdx) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  const det = OUTPUTS[modelIdx].detections[String(sliceIdx)];
+  if (det) {
+    el.textContent = `conf ${(det.conf * 100).toFixed(0)}%`;
+    el.className = 'conf-badge';
+    el.style.color = OUTPUTS[modelIdx].color;
+    el.style.borderColor = OUTPUTS[modelIdx].color + '60';
+  } else {
+    el.textContent = 'no detection';
+    el.className = 'conf-badge conf-none';
+    el.style.color = '';
+    el.style.borderColor = '';
+  }
+}
+
+// ── Navigation ───────────────────────────────────────────────────────────────
+function goToSlice(idx) {
+  currentSlice = Math.max(0, Math.min(SLICES.length - 1, idx));
+  render();
+}
+
+// Mousewheel scroll on viewer
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.ct-viewer-wrap').forEach(el => {
+    el.addEventListener('wheel', e => {
+      e.preventDefault();
+      goToSlice(currentSlice + (e.deltaY > 0 ? 1 : -1));
+    }, { passive: false });
+  });
+});
+
+// ── Model switching ──────────────────────────────────────────────────────────
+function switchModel(idx) {
+  activeModel = idx;
+
+  document.querySelectorAll('.model-tab').forEach(t => t.classList.remove('tab-active'));
+  if (idx === 'compare') {
+    document.querySelector('.tab-compare').classList.add('tab-active');
+    document.getElementById('singleView').classList.add('hidden');
+    document.getElementById('compareView').classList.remove('hidden');
+  } else {
+    document.querySelectorAll('.model-tab[data-model-idx]')[idx].classList.add('tab-active');
+    document.getElementById('singleView').classList.remove('hidden');
+    document.getElementById('compareView').classList.add('hidden');
+    // Update report panel
+    document.getElementById('reportPanelSingle').innerHTML = renderMd(OUTPUTS[idx].report);
+  }
+  render();
+}
+
+// ── Preferred selection ──────────────────────────────────────────────────────
+function selectImagePreferred(idx, btn) {
+  preferred = idx;
+  document.querySelectorAll('.imaging-pref-btn').forEach(b => b.classList.remove('pref-active'));
+  btn.classList.add('pref-active');
+}
+
+// ── Flags (per-model) ────────────────────────────────────────────────────────
+function toggleFlag(btn) {
+  const flag = btn.dataset.flag;
+  const mi   = parseInt(btn.dataset.model);
+  const mf   = modelFeedback[mi];
+  if (mf.flags.includes(flag)) { mf.flags = mf.flags.filter(f => f !== flag); btn.classList.remove('active'); }
+  else { mf.flags.push(flag); btn.classList.add('active'); }
+}
+
+// ── Submit ────────────────────────────────────────────────────────────────────
+async function submitFeedback() {
+  if (preferred === null) { showMsg('Please select a preferred model output.', 'error'); return; }
+  const btn = document.getElementById('submitBtn');
+  btn.disabled = true; btn.textContent = 'Saving…';
+  // Collect per-model comments from textareas
+  OUTPUTS.forEach((_, i) => {
+    const ta = document.getElementById(`comments_${i}`);
+    if (ta) modelFeedback[i].comments = ta.value;
+  });
+  const payload = {
+    case_id: CASE_ID, type: CASE_TYPE,
+    preferred: preferred, ratings: {}, ranking: [],
+    model_feedback: modelFeedback,
+    flags: Object.values(modelFeedback).flatMap(m => m.flags), // flattened for compat
+    comments: Object.entries(modelFeedback).map(([i,m]) => `${OUTPUTS[i].label}: ${m.comments}`).filter(s => !s.endsWith(': ')).join(' | '),
+    annotator_id: document.getElementById('annotatorId').value || 'anonymous',
+    time_on_task_seconds: Math.round((Date.now() - startTime) / 1000),
+  };
+  try {
+    const res = await fetch('/api/feedback', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    if (res.ok) { showMsg('Feedback saved!', 'success'); setTimeout(() => window.location.href='/', 900); }
+    else { showMsg('Server error.', 'error'); btn.disabled=false; btn.textContent='Save Feedback →'; }
+  } catch { showMsg('Network error.', 'error'); btn.disabled=false; btn.textContent='Save Feedback →'; }
+}
+
+function showMsg(text, type) {
+  const el = document.getElementById('submitMsg');
+  el.textContent = text; el.className = 'submit-msg ' + type;
+}
+
+// ── Markdown renderer (reused from app.js) ───────────────────────────────────
+function renderMd(text) {
+  return text
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>')
+    .replace(/^#{1,3} (.+)$/gm,'<span class="md-heading">$1</span>')
+    .replace(/^\d+\.\s+(.+)$/gm,'<span class="md-li-num">$1</span>')
+    .replace(/^[-•]\s+(.+)$/gm,'<span class="md-li">$1</span>')
+    .replace(/\n\n/g,'\n<br>\n');
+}
+
+// ── Restore existing ─────────────────────────────────────────────────────────
+if (EXISTING) {
+  if (EXISTING.preferred !== null && EXISTING.preferred !== undefined) {
+    const btn = document.querySelector(`.imaging-pref-btn[data-idx="${EXISTING.preferred}"]`);
+    if (btn) selectImagePreferred(EXISTING.preferred, btn);
+  }
+  if (EXISTING.model_feedback) {
+    Object.entries(EXISTING.model_feedback).forEach(([mi, mf]) => {
+      modelFeedback[mi] = mf;
+      (mf.flags || []).forEach(f => {
+        const b = document.querySelector(`.flag-chip[data-model="${mi}"][data-flag="${f}"]`);
+        if (b) b.classList.add('active');
+      });
+      const ta = document.getElementById(`comments_${mi}`);
+      if (ta && mf.comments) ta.value = mf.comments;
+    });
+  }
+  if (EXISTING.annotator_id && EXISTING.annotator_id !== 'anonymous')
+    document.getElementById('annotatorId').value = EXISTING.annotator_id;
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+preloadImages().then(() => {
+  switchModel(0);
+});
+</script>
+{% endblock %}

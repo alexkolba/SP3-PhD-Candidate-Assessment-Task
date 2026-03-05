@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Register — MedEval</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@300;400;500&family=Syne:wght@400;700;800&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body class="auth-body">
+  <div class="auth-wrap">
+    <div class="auth-card">
+      <div class="auth-brand">
+        <span class="brand-icon">⬡</span>
+        <span class="auth-brand-name">MedEval</span>
+      </div>
+      <h1 class="auth-title">Create account</h1>
+      <p class="auth-sub">RLHF Annotation Platform</p>
+
+      {% if error %}
+      <div class="auth-error">{{ error }}</div>
+      {% endif %}
+
+      <form method="POST" class="auth-form">
+        <div class="auth-field">
+          <label class="auth-label">Username</label>
+          <input type="text" name="username" class="auth-input" autocomplete="username" required autofocus>
+        </div>
+        <div class="auth-field">
+          <label class="auth-label">Password <span class="auth-hint">(min. 6 characters)</span></label>
+          <input type="password" name="password" class="auth-input" autocomplete="new-password" required>
+        </div>
+        <div class="auth-field">
+          <label class="auth-label">Confirm password</label>
+          <input type="password" name="password2" class="auth-input" autocomplete="new-password" required>
+        </div>
+        <div class="auth-field">
+          <label class="auth-label">Role</label>
+          <select name="role" class="auth-input auth-select" onchange="toggleInvite(this.value)">
+            <option value="annotator">Annotator — submit case feedback</option>
+            <option value="reviewer">Reviewer — view all results</option>
+            <option value="admin">Admin — manage users &amp; data</option>
+          </select>
+        </div>
+        <div class="auth-field" id="inviteField" style="display:none">
+          <label class="auth-label">Admin invite code</label>
+          <input type="text" name="invite_code" class="auth-input auth-mono" placeholder="Enter invite code">
+        </div>
+        <button type="submit" class="btn-primary auth-submit">Create account →</button>
+      </form>
+
+      <p class="auth-switch">Already have an account? <a href="{{ url_for('login') }}" class="auth-link">Sign in</a></p>
+    </div>
+  </div>
+  <script>
+  function toggleInvite(role) {
+    document.getElementById('inviteField').style.display =
+      role === 'admin' ? 'block' : 'none';
+  }
+  </script>
+</body>
+</html>

@@ -1,0 +1,323 @@
+{% extends "base.html" %}
+{% block title %}{{ case.specialty }} Case — MedEval{% endblock %}
+{% block content %}
+
+<div class="case-page">
+
+  <div class="case-breadcrumb">
+    <a href="/" class="back-link">← Queue</a>
+    <span class="crumb-sep">/</span>
+    <span class="crumb-specialty">{{ case.specialty }}</span>
+    <span class="crumb-sep">/</span>
+    <span class="crumb-type">{{ case.type }}</span>
+  </div>
+
+  <div class="case-prompt-block">
+    <div class="prompt-label">
+      <span class="prompt-icon">⬡</span> Clinical Prompt
+    </div>
+    <p class="prompt-text">{{ case.prompt }}</p>
+  </div>
+
+  <div class="outputs-section">
+    <h2 class="outputs-title">
+      Model Outputs
+      <span class="task-hint">
+        {% if case.type == 'comparison' %}— Select your preferred response{% endif %}
+        {% if case.type == 'rating' %}— Rate each response on multiple dimensions{% endif %}
+        {% if case.type == 'ranking' %}— Drag to rank responses from best to worst{% endif %}
+      </span>
+    </h2>
+
+    {# ── COMPARISON ──────────────────────────────────────────────── #}
+    {% if case.type == 'comparison' %}
+    <div class="comparison-grid" id="comparisonGrid">
+      {% for output in case.outputs %}
+      <div class="output-card" data-model-idx="{{ loop.index0 }}" id="card_{{ loop.index0 }}">
+        <div class="output-header">
+          <span class="model-label">{{ output.label }}</span>
+          <span class="model-name">{{ output.model }}</span>
+        </div>
+        <div class="output-body">{{ output.text }}</div>
+        <button class="prefer-btn" onclick="selectPreferred({{ loop.index0 }})">
+          Prefer this response
+        </button>
+      </div>
+      {% endfor %}
+    </div>
+
+    {# ── RATING ───────────────────────────────────────────────────── #}
+    {% elif case.type == 'rating' %}
+    <div class="rating-layout">
+      {% for output in case.outputs %}
+      {% set model_idx = loop.index0 %}
+      <div class="output-card rating-card" data-model-idx="{{ model_idx }}">
+        <div class="output-header">
+          <span class="model-label">{{ output.label }}</span>
+          <span class="model-name">{{ output.model }}</span>
+        </div>
+        <div class="output-body">{{ output.text }}</div>
+        <div class="rating-dimensions">
+          {% for dim, label in [('accuracy','Clinical Accuracy'),('completeness','Completeness'),('safety','Safety'),('clarity','Clarity')] %}
+          <div class="rating-dim">
+            <span class="dim-label">{{ label }}</span>
+            <div class="star-row" data-model="{{ model_idx }}" data-dim="{{ dim }}">
+              {% for i in range(1, 6) %}
+              <button class="star" data-val="{{ i }}" onclick="setRating({{ model_idx }}, '{{ dim }}', {{ i }})">★</button>
+              {% endfor %}
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    {# ── RANKING ──────────────────────────────────────────────────── #}
+    {% elif case.type == 'ranking' %}
+    <div class="ranking-outputs">
+      {% for output in case.outputs %}
+      <div class="output-card ranking-card" data-model-idx="{{ loop.index0 }}">
+        <div class="output-header">
+          <span class="model-label">{{ output.label }}</span>
+          <span class="model-name">{{ output.model }}</span>
+        </div>
+        <div class="output-body">{{ output.text }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="ranking-zone-wrap">
+      <h3 class="ranking-zone-title">Your Ranking <span class="ranking-hint">(drag responses here)</span></h3>
+      <div class="ranking-zone" id="rankingZone">
+        <div class="rank-slot" data-rank="1">
+          <span class="rank-badge">1<sup>st</sup></span>
+          <div class="rank-drop-area" data-rank="1">Best response</div>
+        </div>
+        {% for i in range(2, case.outputs|length + 1) %}
+        <div class="rank-slot" data-rank="{{ i }}">
+          <span class="rank-badge">{{ i }}{% if i == 2 %}<sup>nd</sup>{% elif i == 3 %}<sup>rd</sup>{% else %}<sup>th</sup>{% endif %}</span>
+          <div class="rank-drop-area" data-rank="{{ i }}">Drop here</div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  {# ── SHARED FEEDBACK FORM ─────────────────────────────────────── #}
+  <div class="feedback-form">
+    <h3 class="form-section-title">Additional Feedback</h3>
+
+    <div class="flag-group">
+      <p class="flag-label">Flag any issues:</p>
+      <div class="flag-chips">
+        {% for flag in ['Factual error', 'Dangerous advice', 'Incomplete', 'Hallucination', 'Off-topic', 'Formatting issues'] %}
+        <button class="flag-chip" data-flag="{{ flag }}" onclick="toggleFlag(this)">{{ flag }}</button>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="comment-group">
+      <label for="comments" class="comment-label">Annotator comments <span class="optional">(optional)</span></label>
+      <textarea id="comments" class="comment-input" rows="3" placeholder="Reasoning, edge cases, clinical nuance…"></textarea>
+    </div>
+
+    <div class="annotator-group">
+      <label for="annotatorId" class="comment-label">Annotator ID</label>
+      <input type="text" id="annotatorId" class="annotator-input" placeholder="e.g. dr_smith" value="{{ request.cookies.get('annotator_id', '') }}">
+    </div>
+
+    <div class="form-actions">
+      <a href="/" class="btn-secondary">Cancel</a>
+      <button class="btn-primary" id="submitBtn" onclick="submitFeedback()">
+        Save Feedback →
+      </button>
+    </div>
+
+    <div id="submitMsg" class="submit-msg hidden"></div>
+  </div>
+</div>
+
+<script>
+const CASE_ID   = "{{ case.id }}";
+const CASE_TYPE = "{{ case.type }}";
+const NUM_OUTPUTS = {{ case.outputs | length }};
+const EXISTING  = {{ existing | tojson if existing else 'null' }};
+const startTime = Date.now();
+
+let state = {
+  preferred: null,
+  ratings: {},
+  ranking: [],
+  flags: [],
+};
+
+// ── Restore existing feedback ───────────────────────────────────────────────
+if (EXISTING) {
+  state = { ...state, ...EXISTING };
+  if (CASE_TYPE === 'comparison' && EXISTING.preferred !== null) {
+    selectPreferred(EXISTING.preferred, true);
+  }
+  if (CASE_TYPE === 'rating' && EXISTING.ratings) {
+    Object.entries(EXISTING.ratings).forEach(([modelIdx, dims]) => {
+      Object.entries(dims).forEach(([dim, val]) => setRating(parseInt(modelIdx), dim, val, true));
+    });
+  }
+  if (CASE_TYPE === 'ranking' && EXISTING.ranking.length) {
+    restoreRanking(EXISTING.ranking);
+  }
+  if (EXISTING.flags) EXISTING.flags.forEach(f => {
+    document.querySelectorAll('.flag-chip').forEach(c => { if (c.dataset.flag === f) c.classList.add('active'); });
+    state.flags.push(f);
+  });
+  if (EXISTING.comments) document.getElementById('comments').value = EXISTING.comments;
+}
+
+// ── Comparison ──────────────────────────────────────────────────────────────
+function selectPreferred(idx, silent) {
+  state.preferred = idx;
+  document.querySelectorAll('.output-card').forEach((c, i) => {
+    c.classList.toggle('card-selected', i === idx);
+    c.classList.toggle('card-dimmed',   i !== idx);
+  });
+  document.querySelectorAll('.prefer-btn').forEach((b, i) => {
+    b.textContent = i === idx ? '✓ Preferred' : 'Prefer this response';
+  });
+}
+
+// ── Rating ──────────────────────────────────────────────────────────────────
+function setRating(modelIdx, dim, val, silent) {
+  if (!state.ratings[modelIdx]) state.ratings[modelIdx] = {};
+  state.ratings[modelIdx][dim] = val;
+  const row = document.querySelector(`.star-row[data-model="${modelIdx}"][data-dim="${dim}"]`);
+  if (row) row.querySelectorAll('.star').forEach(s => {
+    s.classList.toggle('star-active', parseInt(s.dataset.val) <= val);
+  });
+}
+
+// ── Ranking (drag-and-drop) ─────────────────────────────────────────────────
+let dragSrc = null;
+
+function initDraggable() {
+  document.querySelectorAll('.ranking-card').forEach(card => {
+    card.setAttribute('draggable', true);
+    card.addEventListener('dragstart', e => {
+      dragSrc = card;
+      e.dataTransfer.effectAllowed = 'move';
+      card.classList.add('dragging');
+    });
+    card.addEventListener('dragend', () => card.classList.remove('dragging'));
+  });
+
+  document.querySelectorAll('.rank-drop-area').forEach(area => {
+    area.addEventListener('dragover', e => { e.preventDefault(); area.classList.add('drag-over'); });
+    area.addEventListener('dragleave', () => area.classList.remove('drag-over'));
+    area.addEventListener('drop', e => {
+      e.preventDefault();
+      area.classList.remove('drag-over');
+      if (!dragSrc) return;
+      const existing = area.querySelector('.ranking-card');
+      if (existing) {
+        const src_parent = dragSrc.closest('.rank-drop-area') || document.querySelector('.ranking-outputs');
+        src_parent.appendChild(existing);
+      }
+      area.innerHTML = '';
+      area.appendChild(dragSrc);
+      updateRankingState();
+    });
+  });
+}
+
+function updateRankingState() {
+  state.ranking = [];
+  document.querySelectorAll('.rank-drop-area').forEach(area => {
+    const card = area.querySelector('.ranking-card');
+    state.ranking.push(card ? parseInt(card.dataset.modelIdx) : null);
+  });
+}
+
+function restoreRanking(ranking) {
+  ranking.forEach((modelIdx, rank) => {
+    if (modelIdx === null) return;
+    const card = document.querySelector(`.ranking-card[data-model-idx="${modelIdx}"]`);
+    const area = document.querySelector(`.rank-drop-area[data-rank="${rank + 1}"]`);
+    if (card && area) { area.innerHTML = ''; area.appendChild(card); }
+  });
+  state.ranking = ranking;
+}
+
+if (CASE_TYPE === 'ranking') initDraggable();
+
+// ── Flags ───────────────────────────────────────────────────────────────────
+function toggleFlag(btn) {
+  const flag = btn.dataset.flag;
+  if (state.flags.includes(flag)) {
+    state.flags = state.flags.filter(f => f !== flag);
+    btn.classList.remove('active');
+  } else {
+    state.flags.push(flag);
+    btn.classList.add('active');
+  }
+}
+
+// ── Submit ──────────────────────────────────────────────────────────────────
+async function submitFeedback() {
+  const btn = document.getElementById('submitBtn');
+  const msg = document.getElementById('submitMsg');
+
+  // Validate
+  if (CASE_TYPE === 'comparison' && state.preferred === null) {
+    showMsg('Please select a preferred response.', 'error'); return;
+  }
+  if (CASE_TYPE === 'rating') {
+    const allRated = Array.from({length: NUM_OUTPUTS}, (_, i) => i)
+      .every(i => state.ratings[i] && Object.keys(state.ratings[i]).length === 4);
+    if (!allRated) { showMsg('Please rate all dimensions for all models.', 'error'); return; }
+  }
+  if (CASE_TYPE === 'ranking') {
+    const filled = document.querySelectorAll('.rank-drop-area .ranking-card').length;
+    if (filled < NUM_OUTPUTS) { showMsg('Please rank all responses before submitting.', 'error'); return; }
+    updateRankingState();
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+
+  const payload = {
+    case_id: CASE_ID,
+    type: CASE_TYPE,
+    ratings: state.ratings,
+    ranking: state.ranking,
+    preferred: state.preferred,
+    comments: document.getElementById('comments').value,
+    flags: state.flags,
+    annotator_id: document.getElementById('annotatorId').value || 'anonymous',
+    time_on_task_seconds: Math.round((Date.now() - startTime) / 1000),
+  };
+
+  try {
+    const res = await fetch('/api/feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (res.ok) {
+      showMsg('Feedback saved!', 'success');
+      setTimeout(() => window.location.href = '/', 900);
+    } else {
+      showMsg('Server error. Try again.', 'error');
+      btn.disabled = false; btn.textContent = 'Save Feedback →';
+    }
+  } catch {
+    showMsg('Network error.', 'error');
+    btn.disabled = false; btn.textContent = 'Save Feedback →';
+  }
+}
+
+function showMsg(text, type) {
+  const el = document.getElementById('submitMsg');
+  el.textContent = text;
+  el.className = 'submit-msg ' + type;
+}
+</script>
+{% endblock %}
