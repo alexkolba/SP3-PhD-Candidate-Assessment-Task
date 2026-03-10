@@ -5,7 +5,7 @@
 <div class="hero">
   <div class="hero-left">
     <p class="hero-eyebrow">Preference Optimisation · Data Collection</p>
-    <h1 class="hero-title">Clinical Output<br><em>Evaluation Queue</em></h1>
+    <h1 class="hero-title">LLM Output<br><em>Evaluation Queue</em></h1>
     <p class="hero-desc">Rate, rank, and compare LLM-generated clinical responses to build preference datasets for RLHF fine-tuning.</p>
   </div>
   <div class="stats-wrap">
@@ -61,7 +61,7 @@
   </div>
 </section>
 
-{% if completed > 0 %}
+{% if completed > 0 and current_user.is_reviewer %}
 <div class="reset-row">
   <button class="btn-ghost-danger" onclick="resetAll()">↺ Reset all feedback</button>
 </div>
