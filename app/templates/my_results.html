@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}My Results — MedEval{% endblock %}
+{% block content %}
+<div class="results-page">
+  <div class="results-header">
+    <h1 class="results-title">My Annotations</h1>
+  </div>
+
+  {% if not feedback %}
+  <div class="empty-state">
+    <span class="empty-icon">◇</span>
+    <p>You haven't submitted any annotations yet.</p>
+    <a href="/" class="btn-primary">Start annotating →</a>
+  </div>
+  {% else %}
+
+  <div class="results-summary">
+    <div class="summary-chip">{{ feedback | length }} submitted</div>
+    <div class="summary-chip">{{ total_cases - feedback | length }} remaining</div>
+  </div>
+
+  <div class="results-table-wrap">
+    <table class="results-table">
+      <thead>
+        <tr>
+          <th>Case</th>
+          <th>Specialty</th>
+          <th>Type</th>
+          <th>Result</th>
+          <th>Per-model flags</th>
+          <th>Time</th>
+          <th>Timestamp</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for f in feedback | sort(attribute='timestamp', reverse=True) %}
+        <tr id="row_{{ f.id }}">
+          <td><a href="/case/{{ f.case_id }}" class="result-case-link">{{ f.case_id }}</a></td>
+          <td><span class="specialty-badge">{{ f.specialty }}</span></td>
+          <td><span class="type-badge type-{{ f.type }}">{{ f.type }}</span></td>
+          <td class="result-cell">
+            {% if f.type == 'comparison' %}
+              Preferred: <strong>{{ f.output_labels[f.preferred | int] if f.preferred is not none and f.preferred != -1 else ('Equivalent' if f.preferred == -1 else '—') }}</strong>
+            {% elif f.type == 'rating' %}
+              <details><summary>View ratings</summary>
+                <div class="rating-detail">
+                  {% for model_idx, dims in f.ratings.items() %}
+                  <div>{{ f.output_labels[model_idx | int] if model_idx | int < f.output_labels | length else 'Model ?' }}:
+                    {% for dim, val in dims.items() %}<span class="dim-val">{{ dim }}: {{ val }}/5</span>{% endfor %}
+                  </div>
+                  {% endfor %}
+                </div>
+              </details>
+            {% elif f.type == 'ranking' %}
+              {% if f.ranking %}
+              {% for idx in f.ranking if idx is not none %}{{ f.output_labels[idx | int] if idx | int < f.output_labels | length else '?' }}{% if not loop.last %} → {% endif %}{% endfor %}
+              {% else %}—{% endif %}
+            {% else %}—{% endif %}
+          </td>
+          <td class="flags-cell">
+            {% if f.model_feedback %}
+              {% set ns = namespace(any_flags=false) %}
+              {% for mi, mf in f.model_feedback.items() %}{% if mf.flags %}{% set ns.any_flags = true %}{% endif %}{% endfor %}
+              {% if ns.any_flags %}
+                {% for mi, mf in f.model_feedback.items() %}
+                  {% if mf.flags %}
+                  <div class="per-model-flags">
+                    <span class="pmf-label">{{ f.output_labels[mi | int] if mi | int < f.output_labels | length else 'Model ?' }}:</span>
+                    {% for flag in mf.flags %}<span class="flag-tag">{{ flag }}</span>{% endfor %}
+                  </div>
+                  {% endif %}
+                {% endfor %}
+              {% else %}—{% endif %}
+            {% elif f.flags %}{% for flag in f.flags %}<span class="flag-tag">{{ flag }}</span>{% endfor %}
+            {% else %}—{% endif %}
+          </td>
+          <td>{{ f.time_on_task_seconds }}s</td>
+          <td class="ts-cell">{{ f.timestamp[:19].replace('T',' ') }}</td>
+          <td>
+            <button class="btn-ghost-danger btn-sm" onclick="deleteAnnotation('{{ f.id }}')">✕</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
+
+<script>
+async function deleteAnnotation(id) {
+  if (!confirm('Delete this annotation?')) return;
+  const res = await fetch(`/api/feedback/${id}`, { method: 'DELETE' });
+  if (res.ok) { document.getElementById(`row_${id}`).remove(); }
+  else { alert('Failed to delete annotation.'); }
+}
+</script>
+{% endblock %}

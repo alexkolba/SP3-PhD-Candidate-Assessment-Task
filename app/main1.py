@@ -784,7 +784,6 @@ def submit_feedback():
         "model_feedback":       data.get("model_feedback", {}),
         "comments":             data.get("comments", ""),
         "flags":                data.get("flags", []),
-        "clinician_annotation": data.get("clinician_annotation"),
         "annotator_id":         current_user.username,
         "annotator_role":       current_user.role,
         "timestamp":            datetime.utcnow().isoformat() + "Z",
@@ -792,10 +791,6 @@ def submit_feedback():
     }
     feedback.append(entry)
     save_json(DATA_FILE, feedback)
-    ca = entry.get("clinician_annotation")
-    nodule_count = len(ca.get("nodules", [])) if ca else 0
-    roi_count = sum(len(n.get("rois",[])) for n in ca.get("nodules",[])) if ca else 0
-    app.logger.info(f"[feedback saved] case={entry['case_id']} annotator={entry['annotator_id']} nodules={nodule_count} rois={roi_count}")
     return jsonify({"status": "ok", "id": entry["id"]})
 
 
@@ -844,20 +839,6 @@ def my_results():
     enriched = enrich_feedback(feedback, cases)
     return render_template("my_results.html", feedback=enriched,
                            total_cases=len(cases))
-
-
-@app.route("/api/debug-latest")
-@login_required
-def debug_latest():
-    feedback = get_feedback()
-    if not feedback:
-        return jsonify({"error": "no feedback"})
-    latest = feedback[-1]
-    return jsonify({
-        "case_id": latest.get("case_id"),
-        "annotator_id": latest.get("annotator_id"),
-        "clinician_annotation": latest.get("clinician_annotation"),
-    })
 
 
 @app.route("/api/export")

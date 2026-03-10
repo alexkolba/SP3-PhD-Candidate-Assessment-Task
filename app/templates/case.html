@@ -10,12 +10,11 @@
     <span class="crumb-specialty">{{ case.specialty }}</span>
     <span class="crumb-sep">/</span>
     <span class="crumb-type">{{ case.type }}</span>
+    {% if readonly %}<span class="crumb-sep">/</span><span class="readonly-badge">read-only</span>{% endif %}
   </div>
 
   <div class="case-prompt-block">
-    <div class="prompt-label">
-      <span class="prompt-icon">⬡</span> Clinical Prompt
-    </div>
+    <div class="prompt-label"><span class="prompt-icon">⬡</span> Clinical Prompt</div>
     <p class="prompt-text">{{ case.prompt }}</p>
   </div>
 
@@ -23,13 +22,15 @@
     <h2 class="outputs-title">
       Model Outputs
       <span class="task-hint">
-        {% if case.type == 'comparison' %}— Select your preferred response{% endif %}
-        {% if case.type == 'rating' %}— Rate each response on multiple dimensions{% endif %}
-        {% if case.type == 'ranking' %}— Drag to rank responses from best to worst{% endif %}
+        {% if not readonly %}
+          {% if case.type == 'comparison' %}— Select your preferred response{% endif %}
+          {% if case.type == 'rating' %}— Rate each response on multiple dimensions{% endif %}
+          {% if case.type == 'ranking' %}— Assign a rank to each response{% endif %}
+        {% endif %}
       </span>
     </h2>
 
-    {# ── COMPARISON ──────────────────────────────────────────────── #}
+    {# ── COMPARISON ───────────────────────────────────────────── #}
     {% if case.type == 'comparison' %}
     <div class="comparison-grid" id="comparisonGrid">
       {% for output in case.outputs %}
@@ -39,14 +40,14 @@
           <span class="model-name">{{ output.model }}</span>
         </div>
         <div class="output-body">{{ output.text }}</div>
-        <button class="prefer-btn" onclick="selectPreferred({{ loop.index0 }})">
-          Prefer this response
-        </button>
+        {% if not readonly %}
+        <button class="prefer-btn" onclick="selectPreferred({{ loop.index0 }})">Prefer this response</button>
+        {% endif %}
       </div>
       {% endfor %}
     </div>
 
-    {# ── RATING ───────────────────────────────────────────────────── #}
+    {# ── RATING ───────────────────────────────────────────────── #}
     {% elif case.type == 'rating' %}
     <div class="rating-layout">
       {% for output in case.outputs %}
@@ -57,215 +58,240 @@
           <span class="model-name">{{ output.model }}</span>
         </div>
         <div class="output-body">{{ output.text }}</div>
+        {% if not readonly %}
         <div class="rating-dimensions">
           {% for dim, label in [('accuracy','Clinical Accuracy'),('completeness','Completeness'),('safety','Safety'),('clarity','Clarity')] %}
           <div class="rating-dim">
             <span class="dim-label">{{ label }}</span>
             <div class="star-row" data-model="{{ model_idx }}" data-dim="{{ dim }}">
               {% for i in range(1, 6) %}
-              <button class="star" data-val="{{ i }}" onclick="setRating({{ model_idx }}, '{{ dim }}', {{ i }})">★</button>
+              <button class="star" data-val="{{ i }}"
+                onclick="setRating({{ model_idx }}, '{{ dim }}', {{ i }})"
+                onmouseenter="hoverStars(this)"
+                onmouseleave="unhoverStars(this)">★</button>
               {% endfor %}
             </div>
           </div>
           {% endfor %}
         </div>
+        {% endif %}
       </div>
       {% endfor %}
     </div>
 
-    {# ── RANKING ──────────────────────────────────────────────────── #}
+    {# ── RANKING ──────────────────────────────────────────────── #}
     {% elif case.type == 'ranking' %}
-    <div class="ranking-outputs">
-      {% for output in case.outputs %}
-      <div class="output-card ranking-card" data-model-idx="{{ loop.index0 }}">
-        <div class="output-header">
-          <span class="model-label">{{ output.label }}</span>
-          <span class="model-name">{{ output.model }}</span>
-        </div>
-        <div class="output-body">{{ output.text }}</div>
-      </div>
-      {% endfor %}
-    </div>
-    <div class="ranking-zone-wrap">
-      <h3 class="ranking-zone-title">Your Ranking <span class="ranking-hint">(drag responses here)</span></h3>
-      <div class="ranking-zone" id="rankingZone">
-        <div class="rank-slot" data-rank="1">
-          <span class="rank-badge">1<sup>st</sup></span>
-          <div class="rank-drop-area" data-rank="1">Best response</div>
-        </div>
-        {% for i in range(2, case.outputs|length + 1) %}
-        <div class="rank-slot" data-rank="{{ i }}">
-          <span class="rank-badge">{{ i }}{% if i == 2 %}<sup>nd</sup>{% elif i == 3 %}<sup>rd</sup>{% else %}<sup>th</sup>{% endif %}</span>
-          <div class="rank-drop-area" data-rank="{{ i }}">Drop here</div>
+    <div class="ranking-layout">
+      <div class="ranking-outputs">
+        {% for output in case.outputs %}
+        <div class="output-card" id="rankCard_{{ loop.index0 }}">
+          <div class="output-header">
+            <span class="model-label">{{ output.label }}</span>
+            <span class="model-name">{{ output.model }}</span>
+            {% if not readonly %}
+            <div class="rank-select-wrap">
+              <label class="rank-select-label">Rank</label>
+              <select class="rank-select-dropdown" id="rankSelect_{{ loop.index0 }}"
+                data-model-idx="{{ loop.index0 }}"
+                onchange="onRankChange()">
+                <option value="">—</option>
+                {% for r in range(1, case.outputs|length + 1) %}
+                <option value="{{ r }}">{{ r }}{% if r == 1 %}st{% elif r == 2 %}nd{% elif r == 3 %}rd{% else %}th{% endif %}</option>
+                {% endfor %}
+              </select>
+            </div>
+            {% endif %}
+          </div>
+          <div class="output-body">{{ output.text }}</div>
         </div>
         {% endfor %}
       </div>
+      {% if not readonly %}
+      <div id="rankingValidation" class="ranking-validation hidden">
+        <span id="rankingValidationMsg"></span>
+      </div>
+      {% endif %}
     </div>
     {% endif %}
   </div>
 
-  {# ── SHARED FEEDBACK FORM ─────────────────────────────────────── #}
+  {# ── FEEDBACK FORM ────────────────────────────────────────── #}
+  {% if not readonly %}
   <div class="feedback-form">
-    <h3 class="form-section-title">Additional Feedback</h3>
+    <h3 class="form-section-title">Feedback</h3>
 
-    <div class="flag-group">
-      <p class="flag-label">Flag any issues:</p>
-      <div class="flag-chips">
-        {% for flag in ['Factual error', 'Dangerous advice', 'Incomplete', 'Hallucination', 'Off-topic', 'Formatting issues'] %}
-        <button class="flag-chip" data-flag="{{ flag }}" onclick="toggleFlag(this)">{{ flag }}</button>
+    {# Overall preference for comparison #}
+    {% if case.type == 'comparison' %}
+    <div class="imaging-pref-group" style="margin-bottom:1.25rem">
+      <p class="flag-label">Overall preference:</p>
+      <div class="imaging-pref-btns">
+        {% for output in case.outputs %}
+        <button class="imaging-pref-btn" data-idx="{{ loop.index0 }}"
+          onclick="selectPreferred({{ loop.index0 }})">
+          {{ output.label }} — {{ output.model }}
+        </button>
         {% endfor %}
+        <button class="imaging-pref-btn" data-idx="-1" onclick="selectPreferred(-1)">
+          Equivalent / Cannot decide
+        </button>
       </div>
     </div>
+    {% endif %}
 
-    <div class="comment-group">
-      <label for="comments" class="comment-label">Annotator comments <span class="optional">(optional)</span></label>
-      <textarea id="comments" class="comment-input" rows="3" placeholder="Reasoning, edge cases, clinical nuance…"></textarea>
+    {# Per-model panels #}
+    <div class="per-model-feedback">
+      {% for output in case.outputs %}
+      {% set mi = loop.index0 %}
+      <div class="model-feedback-panel" style="--tab-color: {{ output.color if output.color is defined else '#4af0c4' }}">
+        <div class="model-feedback-header">
+          <span class="model-feedback-label">{{ output.label }}</span>
+          <span class="model-feedback-name">{{ output.model }}</span>
+        </div>
+        <div class="flag-group">
+          <p class="flag-label">Flag issues:</p>
+          <div class="flag-chips">
+            {% for flag in ['Factual error', 'Dangerous advice', 'Incomplete', 'Hallucination', 'Off-topic', 'Formatting issues'] %}
+            <button class="flag-chip" data-model="{{ mi }}" data-flag="{{ flag }}" onclick="toggleFlag(this)">{{ flag }}</button>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="comment-group" style="margin-top:.9rem">
+          <label class="comment-label">Comments <span class="optional">(optional)</span></label>
+          <textarea id="comments_{{ mi }}" class="comment-input" rows="2" placeholder="Reasoning, edge cases, clinical nuance…"></textarea>
+        </div>
+      </div>
+      {% endfor %}
     </div>
 
-    <div class="annotator-group">
-      <label for="annotatorId" class="comment-label">Annotator ID</label>
-      <input type="text" id="annotatorId" class="annotator-input" placeholder="e.g. dr_smith" value="{{ request.cookies.get('annotator_id', '') }}">
-    </div>
-
-    <div class="form-actions">
+    <div class="form-actions" style="margin-top:1.25rem">
       <a href="/" class="btn-secondary">Cancel</a>
-      <button class="btn-primary" id="submitBtn" onclick="submitFeedback()">
-        Save Feedback →
-      </button>
+      <button class="btn-primary" id="submitBtn" onclick="submitFeedback()">Save Feedback →</button>
     </div>
-
     <div id="submitMsg" class="submit-msg hidden"></div>
   </div>
+  {% endif %}
+
 </div>
 
 <script>
-const CASE_ID   = "{{ case.id }}";
-const CASE_TYPE = "{{ case.type }}";
+const CASE_ID     = {{ case.id | tojson }};
+const CASE_TYPE   = {{ case.type | tojson }};
 const NUM_OUTPUTS = {{ case.outputs | length }};
-const EXISTING  = {{ existing | tojson if existing else 'null' }};
-const startTime = Date.now();
+const OUTPUTS     = {{ case.outputs | tojson }};
+const READONLY    = {{ 'true' if readonly else 'false' }};
+const EXISTING    = {{ existing | tojson if existing else 'null' }};
+const startTime   = Date.now();
 
-let state = {
-  preferred: null,
-  ratings: {},
-  ranking: [],
-  flags: [],
-};
+let state = { preferred: null, ratings: {}, ranking: [], flags: [] };
+let modelFeedback = Object.fromEntries(
+  Array.from({length: NUM_OUTPUTS}, (_, i) => [i, { flags: [], comments: '' }])
+);
 
-// ── Restore existing feedback ───────────────────────────────────────────────
+// ── Restore existing ──────────────────────────────────────────────────────────
 if (EXISTING) {
   state = { ...state, ...EXISTING };
-  if (CASE_TYPE === 'comparison' && EXISTING.preferred !== null) {
+  if (CASE_TYPE === 'comparison' && EXISTING.preferred !== null && EXISTING.preferred !== undefined)
     selectPreferred(EXISTING.preferred, true);
-  }
-  if (CASE_TYPE === 'rating' && EXISTING.ratings) {
-    Object.entries(EXISTING.ratings).forEach(([modelIdx, dims]) => {
-      Object.entries(dims).forEach(([dim, val]) => setRating(parseInt(modelIdx), dim, val, true));
+  if (CASE_TYPE === 'rating' && EXISTING.ratings)
+    Object.entries(EXISTING.ratings).forEach(([mi, dims]) =>
+      Object.entries(dims).forEach(([dim, val]) => setRating(parseInt(mi), dim, val, true)));
+  if (CASE_TYPE === 'ranking' && EXISTING.ranking && EXISTING.ranking.length)
+    restoreRanking(EXISTING.ranking);
+  if (EXISTING.model_feedback) {
+    Object.entries(EXISTING.model_feedback).forEach(([mi, mf]) => {
+      modelFeedback[mi] = mf;
+      (mf.flags || []).forEach(f => {
+        const b = document.querySelector(`.flag-chip[data-model="${mi}"][data-flag="${f}"]`);
+        if (b) b.classList.add('active');
+      });
+      const ta = document.getElementById(`comments_${mi}`);
+      if (ta && mf.comments) ta.value = mf.comments;
     });
   }
-  if (CASE_TYPE === 'ranking' && EXISTING.ranking.length) {
-    restoreRanking(EXISTING.ranking);
-  }
-  if (EXISTING.flags) EXISTING.flags.forEach(f => {
-    document.querySelectorAll('.flag-chip').forEach(c => { if (c.dataset.flag === f) c.classList.add('active'); });
-    state.flags.push(f);
-  });
-  if (EXISTING.comments) document.getElementById('comments').value = EXISTING.comments;
 }
 
-// ── Comparison ──────────────────────────────────────────────────────────────
+// ── Comparison ────────────────────────────────────────────────────────────────
 function selectPreferred(idx, silent) {
   state.preferred = idx;
   document.querySelectorAll('.output-card').forEach((c, i) => {
     c.classList.toggle('card-selected', i === idx);
-    c.classList.toggle('card-dimmed',   i !== idx);
+    c.classList.toggle('card-dimmed',   i !== idx && idx !== -1);
   });
   document.querySelectorAll('.prefer-btn').forEach((b, i) => {
     b.textContent = i === idx ? '✓ Preferred' : 'Prefer this response';
   });
+  document.querySelectorAll('.imaging-pref-btn').forEach(b => b.classList.remove('pref-active'));
+  const active = document.querySelector(`.imaging-pref-btn[data-idx="${idx}"]`);
+  if (active) active.classList.add('pref-active');
 }
 
-// ── Rating ──────────────────────────────────────────────────────────────────
+// ── Rating ────────────────────────────────────────────────────────────────────
 function setRating(modelIdx, dim, val, silent) {
   if (!state.ratings[modelIdx]) state.ratings[modelIdx] = {};
   state.ratings[modelIdx][dim] = val;
   const row = document.querySelector(`.star-row[data-model="${modelIdx}"][data-dim="${dim}"]`);
-  if (row) row.querySelectorAll('.star').forEach(s => {
-    s.classList.toggle('star-active', parseInt(s.dataset.val) <= val);
-  });
+  if (row) row.querySelectorAll('.star').forEach(s =>
+    s.classList.toggle('star-active', parseInt(s.dataset.val) <= val));
 }
 
-// ── Ranking (drag-and-drop) ─────────────────────────────────────────────────
-let dragSrc = null;
-
-function initDraggable() {
-  document.querySelectorAll('.ranking-card').forEach(card => {
-    card.setAttribute('draggable', true);
-    card.addEventListener('dragstart', e => {
-      dragSrc = card;
-      e.dataTransfer.effectAllowed = 'move';
-      card.classList.add('dragging');
-    });
-    card.addEventListener('dragend', () => card.classList.remove('dragging'));
-  });
-
-  document.querySelectorAll('.rank-drop-area').forEach(area => {
-    area.addEventListener('dragover', e => { e.preventDefault(); area.classList.add('drag-over'); });
-    area.addEventListener('dragleave', () => area.classList.remove('drag-over'));
-    area.addEventListener('drop', e => {
-      e.preventDefault();
-      area.classList.remove('drag-over');
-      if (!dragSrc) return;
-      const existing = area.querySelector('.ranking-card');
-      if (existing) {
-        const src_parent = dragSrc.closest('.rank-drop-area') || document.querySelector('.ranking-outputs');
-        src_parent.appendChild(existing);
-      }
-      area.innerHTML = '';
-      area.appendChild(dragSrc);
-      updateRankingState();
-    });
-  });
+// ── Star hover ────────────────────────────────────────────────────────────────
+function hoverStars(btn) {
+  const val = parseInt(btn.dataset.val);
+  btn.closest('.star-row').querySelectorAll('.star').forEach(s =>
+    s.classList.toggle('star-hover', parseInt(s.dataset.val) <= val));
+}
+function unhoverStars(btn) {
+  btn.closest('.star-row').querySelectorAll('.star').forEach(s =>
+    s.classList.remove('star-hover'));
 }
 
+// ── Ranking (dropdowns) ───────────────────────────────────────────────────────
+function onRankChange() {
+  const selects = Array.from(document.querySelectorAll('.rank-select-dropdown'));
+  const changed = selects.find(s => s === document.activeElement) || selects[0];
+  const val = changed.value;
+  if (val !== '') selects.forEach(s => { if (s !== changed && s.value === val) s.value = ''; });
+  updateRankingState();
+  validateRanking();
+}
 function updateRankingState() {
-  state.ranking = [];
-  document.querySelectorAll('.rank-drop-area').forEach(area => {
-    const card = area.querySelector('.ranking-card');
-    state.ranking.push(card ? parseInt(card.dataset.modelIdx) : null);
-  });
+  const selects = Array.from(document.querySelectorAll('.rank-select-dropdown'));
+  const rankToModel = {};
+  selects.forEach(s => { if (s.value !== '') rankToModel[parseInt(s.value)] = parseInt(s.dataset.modelIdx); });
+  state.ranking = Array.from({length: NUM_OUTPUTS}, (_, i) =>
+    rankToModel[i + 1] !== undefined ? rankToModel[i + 1] : null);
 }
-
+function validateRanking() {
+  const selects = Array.from(document.querySelectorAll('.rank-select-dropdown'));
+  const assigned = selects.filter(s => s.value !== '').length;
+  const el = document.getElementById('rankingValidation');
+  const msg = document.getElementById('rankingValidationMsg');
+  if (!el) return;
+  if (assigned === NUM_OUTPUTS) { el.className = 'ranking-validation valid'; msg.textContent = '✓ All models ranked'; }
+  else { el.className = 'ranking-validation'; msg.textContent = `${assigned} of ${NUM_OUTPUTS} models ranked`; }
+}
 function restoreRanking(ranking) {
-  ranking.forEach((modelIdx, rank) => {
+  ranking.forEach((modelIdx, rankPos) => {
     if (modelIdx === null) return;
-    const card = document.querySelector(`.ranking-card[data-model-idx="${modelIdx}"]`);
-    const area = document.querySelector(`.rank-drop-area[data-rank="${rank + 1}"]`);
-    if (card && area) { area.innerHTML = ''; area.appendChild(card); }
+    const sel = document.getElementById(`rankSelect_${modelIdx}`);
+    if (sel) sel.value = String(rankPos + 1);
   });
   state.ranking = ranking;
+  validateRanking();
 }
+if (CASE_TYPE === 'ranking') validateRanking();
 
-if (CASE_TYPE === 'ranking') initDraggable();
-
-// ── Flags ───────────────────────────────────────────────────────────────────
+// ── Flags (per-model) ─────────────────────────────────────────────────────────
 function toggleFlag(btn) {
   const flag = btn.dataset.flag;
-  if (state.flags.includes(flag)) {
-    state.flags = state.flags.filter(f => f !== flag);
-    btn.classList.remove('active');
-  } else {
-    state.flags.push(flag);
-    btn.classList.add('active');
-  }
+  const mi   = parseInt(btn.dataset.model);
+  const mf   = modelFeedback[mi];
+  if (mf.flags.includes(flag)) { mf.flags = mf.flags.filter(f => f !== flag); btn.classList.remove('active'); }
+  else { mf.flags.push(flag); btn.classList.add('active'); }
 }
 
-// ── Submit ──────────────────────────────────────────────────────────────────
+// ── Submit ────────────────────────────────────────────────────────────────────
 async function submitFeedback() {
-  const btn = document.getElementById('submitBtn');
-  const msg = document.getElementById('submitMsg');
-
-  // Validate
   if (CASE_TYPE === 'comparison' && state.preferred === null) {
     showMsg('Please select a preferred response.', 'error'); return;
   }
@@ -275,49 +301,46 @@ async function submitFeedback() {
     if (!allRated) { showMsg('Please rate all dimensions for all models.', 'error'); return; }
   }
   if (CASE_TYPE === 'ranking') {
-    const filled = document.querySelectorAll('.rank-drop-area .ranking-card').length;
-    if (filled < NUM_OUTPUTS) { showMsg('Please rank all responses before submitting.', 'error'); return; }
     updateRankingState();
+    if (state.ranking.some(v => v === null)) { showMsg('Please assign a rank to every model.', 'error'); return; }
   }
 
-  btn.disabled = true;
-  btn.textContent = 'Saving…';
+  // Collect per-model comments
+  Array.from({length: NUM_OUTPUTS}, (_, i) => {
+    const ta = document.getElementById(`comments_${i}`);
+    if (ta) modelFeedback[i].comments = ta.value;
+  });
+
+  const btn = document.getElementById('submitBtn');
+  btn.disabled = true; btn.textContent = 'Saving…';
 
   const payload = {
-    case_id: CASE_ID,
-    type: CASE_TYPE,
-    ratings: state.ratings,
-    ranking: state.ranking,
+    case_id: CASE_ID, type: CASE_TYPE,
+    ratings: state.ratings, ranking: state.ranking,
     preferred: state.preferred,
-    comments: document.getElementById('comments').value,
-    flags: state.flags,
-    annotator_id: document.getElementById('annotatorId').value || 'anonymous',
+    model_feedback: modelFeedback,
+    flags: Object.values(modelFeedback).flatMap(m => m.flags),
+    comments: Object.entries(modelFeedback)
+      .map(([i, m]) => m.comments ? `${OUTPUTS[i]?.label}: ${m.comments}` : '')
+      .filter(Boolean).join(' | '),
     time_on_task_seconds: Math.round((Date.now() - startTime) / 1000),
   };
 
   try {
     const res = await fetch('/api/feedback', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload),
     });
-    if (res.ok) {
-      showMsg('Feedback saved!', 'success');
-      setTimeout(() => window.location.href = '/', 900);
-    } else {
-      showMsg('Server error. Try again.', 'error');
-      btn.disabled = false; btn.textContent = 'Save Feedback →';
-    }
+    if (res.ok) { showMsg('Feedback saved!', 'success'); setTimeout(() => window.location.href = '/', 900); }
+    else { showMsg('Server error. Try again.', 'error'); btn.disabled = false; btn.textContent = 'Save Feedback →'; }
   } catch {
-    showMsg('Network error.', 'error');
-    btn.disabled = false; btn.textContent = 'Save Feedback →';
+    showMsg('Network error.', 'error'); btn.disabled = false; btn.textContent = 'Save Feedback →';
   }
 }
 
 function showMsg(text, type) {
   const el = document.getElementById('submitMsg');
-  el.textContent = text;
-  el.className = 'submit-msg ' + type;
+  el.textContent = text; el.className = 'submit-msg ' + type;
 }
 </script>
 {% endblock %}

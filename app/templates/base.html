@@ -19,11 +19,17 @@
     <div class="nav-links">
       {% if current_user.is_authenticated %}
         <a href="/" class="nav-link {% if request.endpoint == 'index' %}active{% endif %}">Queue</a>
+        {% if current_user.is_annotator and not current_user.is_reviewer %}
+          {# Pure annotators get My Results only #}
+          <a href="/my-results" class="nav-link {% if request.endpoint == 'my_results' %}active{% endif %}">My Results</a>
+        {% endif %}
         {% if current_user.is_reviewer %}
-          <a href="/results" class="nav-link {% if request.endpoint == 'results' %}active{% endif %}">Results</a>
+          {# Reviewers/admins get All Results and Export; no My Results (they can't annotate) #}
+          <a href="/results" class="nav-link {% if request.endpoint == 'results' %}active{% endif %}">All Results</a>
           <a href="/api/export" class="nav-link" target="_blank">Export JSON</a>
         {% endif %}
         {% if current_user.is_admin %}
+          <a href="/my-results" class="nav-link {% if request.endpoint == 'my_results' %}active{% endif %}">My Results</a>
           <a href="/admin" class="nav-link {% if request.endpoint == 'admin_panel' %}active{% endif %}">Admin</a>
         {% endif %}
         <div class="nav-user">

@@ -126,7 +126,7 @@
   </details>
   {% endif %}
 
-  {# ── Per-case imaging accuracy — always shown when any imaging feedback exists #}
+  {# ── Per-case imaging accuracy ──────────────────────────────── #}
   {% if img_per_case %}
   <details class="analytics-panel">
     <summary class="analytics-title">
@@ -135,11 +135,7 @@
       <span class="panel-hint">click to expand</span>
     </summary>
     <div class="analytics-body">
-      <p class="analytics-desc">
-        IoU between model bounding boxes and clinician-drawn ROIs on matching slices.
-        Characterisation accuracy = mean normalised agreement across LUNA16 fields (malignancy, texture, lobulation, spiculation, calcification).
-        Rows marked <em>awaiting annotation</em> need a clinician to draw nodule ROIs on that case before scores can be computed.
-      </p>
+      <p class="analytics-desc">IoU between model bounding boxes and clinician-drawn ROIs on matching slices. Characterisation accuracy is mean normalised agreement across LUNA16 fields.</p>
       <table class="results-table" style="margin-top:.75rem">
         <thead><tr>
           <th>Case</th><th>Model</th><th>Annotator</th>
@@ -156,8 +152,6 @@
               <span class="iou-val {% if row.avg_iou >= 0.5 %}iou-good{% elif row.avg_iou < 0.25 %}iou-bad{% endif %}">
                 {{ (row.avg_iou * 100) | int }}%
               </span>
-              {% elif not row.has_clin %}
-              <span class="iou-val" style="color:var(--text-3);font-weight:400">awaiting annotation</span>
               {% else %}—{% endif %}
             </td>
             <td>
@@ -165,8 +159,6 @@
               <span class="iou-val {% if row.char_acc >= 0.75 %}iou-good{% elif row.char_acc < 0.5 %}iou-bad{% endif %}">
                 {{ (row.char_acc * 100) | int }}%
               </span>
-              {% elif not row.has_clin %}
-              <span class="iou-val" style="color:var(--text-3);font-weight:400">awaiting annotation</span>
               {% else %}—{% endif %}
             </td>
           </tr>

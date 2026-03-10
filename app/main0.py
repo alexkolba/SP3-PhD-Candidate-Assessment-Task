@@ -517,76 +517,69 @@ def _char_accuracy(model_chars, clin_chars):
 
 def compute_imaging_accuracy(feedback, cases):
     """
-    For every feedback entry on an imaging case, emit a row.
-    If the entry has clinician_annotation with nodule ROIs, compute IoU and
-    characterisation accuracy; otherwise the row shows "awaiting annotation".
+    For each imaging case feedback entry that has a clinician_annotation,
+    compute per-model IoU and characterisation accuracy.
     Returns:
-      per_case  – list of {case_id, model, avg_iou, char_acc, annotator, has_clin}
+      per_case  – list of {case_id, model, iou, char_acc, annotator}
       per_model – dict {model_name: {avg_iou, avg_char_acc}}
     """
-    case_map     = {c["id"]: c for c in cases}
-    imaging_ids  = {c["id"] for c in cases if c.get("case_folder")}
-    per_case     = []
-    model_acc    = defaultdict(lambda: {"ious": [], "char_accs": []})
+    case_map = {c["id"]: c for c in cases}
+    per_case  = []
+    model_acc = defaultdict(lambda: {"ious": [], "char_accs": []})
 
     for f in feedback:
-        if f.get("case_id") not in imaging_ids:
+        ca = f.get("clinician_annotation")
+        if not ca:
             continue
-        ca      = f.get("clinician_annotation")
         case    = case_map.get(f["case_id"], {})
         outputs = case.get("outputs", [])
 
         # Collect all clinician ROIs across nodules
-        clin_rois_by_slice = {}
-        has_clin = False
-        if ca:
-            nodule_list = ca.get("nodules", [])
-            for nodule in nodule_list:
-                clin_chars = nodule.get("chars", {})
-                for roi in nodule.get("rois", []):
-                    s = roi.get("slice")
-                    if s is not None:
-                        has_clin = True
-                        clin_rois_by_slice.setdefault(s, []).append({
-                            "box": roi, "chars": clin_chars
-                        })
-            # Legacy single-roi fallback
-            legacy_roi = ca.get("roi")
-            if legacy_roi and not nodule_list:
-                s = legacy_roi.get("slice")
+        clin_rois_by_slice = {}  # slice_idx -> list of roi dicts
+        nodules = ca.get("nodules", [])
+        for nodule in nodules:
+            clin_chars = nodule.get("chars", {})
+            for roi in nodule.get("rois", []):
+                s = roi.get("slice")
                 if s is not None:
-                    has_clin = True
                     clin_rois_by_slice.setdefault(s, []).append({
-                        "box": legacy_roi, "chars": ca.get("chars", {})
+                        "box": roi, "chars": clin_chars
                     })
+
+        # Fallback: legacy single-roi format
+        legacy_roi = ca.get("roi")
+        if legacy_roi and not nodules:
+            s = legacy_roi.get("slice")
+            if s is not None:
+                clin_rois_by_slice.setdefault(s, []).append({
+                    "box": legacy_roi, "chars": ca.get("chars", {})
+                })
 
         for out in outputs:
             model      = out["model"]
             detections = out.get("detections", {})
             ious, char_accs = [], []
 
-            if has_clin:
-                for slice_str, det in detections.items():
-                    if det is None:
-                        continue
-                    s = int(slice_str)
-                    for clin in clin_rois_by_slice.get(s, []):
-                        iou = _iou_fractions(det, clin["box"])
-                        ious.append(iou)
-                        ca_score = _char_accuracy(out.get("nodule_chars", {}), clin["chars"])
-                        if ca_score is not None:
-                            char_accs.append(ca_score)
+            for slice_str, det in detections.items():
+                if det is None:
+                    continue
+                s = int(slice_str)
+                for clin in clin_rois_by_slice.get(s, []):
+                    iou = _iou_fractions(det, clin["box"])
+                    ious.append(iou)
+                    ca_score = _char_accuracy(out.get("nodule_chars", {}), clin["chars"])
+                    if ca_score is not None:
+                        char_accs.append(ca_score)
 
-            avg_iou      = round(sum(ious)      / len(ious),      3) if ious      else None
-            avg_char_acc = round(sum(char_accs)  / len(char_accs), 3) if char_accs else None
+            avg_iou      = round(sum(ious)     / len(ious),     3) if ious     else None
+            avg_char_acc = round(sum(char_accs) / len(char_accs), 3) if char_accs else None
 
             per_case.append({
-                "case_id":  f["case_id"],
-                "model":    model,
-                "annotator": f.get("annotator_id", "?"),
-                "avg_iou":  avg_iou,
-                "char_acc": avg_char_acc,
-                "has_clin": has_clin,
+                "case_id":    f["case_id"],
+                "model":      model,
+                "annotator":  f.get("annotator_id", "?"),
+                "avg_iou":    avg_iou,
+                "char_acc":   avg_char_acc,
             })
 
             if avg_iou is not None:
@@ -597,8 +590,8 @@ def compute_imaging_accuracy(feedback, cases):
     per_model = {}
     for model, vals in model_acc.items():
         per_model[model] = {
-            "avg_iou":      round(sum(vals["ious"])      / len(vals["ious"]),      3) if vals["ious"]      else None,
-            "avg_char_acc": round(sum(vals["char_accs"])  / len(vals["char_accs"]), 3) if vals["char_accs"] else None,
+            "avg_iou":      round(sum(vals["ious"])     / len(vals["ious"]),     3) if vals["ious"]     else None,
+            "avg_char_acc": round(sum(vals["char_accs"]) / len(vals["char_accs"]), 3) if vals["char_accs"] else None,
         }
 
     return per_case, per_model
@@ -784,7 +777,6 @@ def submit_feedback():
         "model_feedback":       data.get("model_feedback", {}),
         "comments":             data.get("comments", ""),
         "flags":                data.get("flags", []),
-        "clinician_annotation": data.get("clinician_annotation"),
         "annotator_id":         current_user.username,
         "annotator_role":       current_user.role,
         "timestamp":            datetime.utcnow().isoformat() + "Z",
@@ -792,10 +784,6 @@ def submit_feedback():
     }
     feedback.append(entry)
     save_json(DATA_FILE, feedback)
-    ca = entry.get("clinician_annotation")
-    nodule_count = len(ca.get("nodules", [])) if ca else 0
-    roi_count = sum(len(n.get("rois",[])) for n in ca.get("nodules",[])) if ca else 0
-    app.logger.info(f"[feedback saved] case={entry['case_id']} annotator={entry['annotator_id']} nodules={nodule_count} rois={roi_count}")
     return jsonify({"status": "ok", "id": entry["id"]})
 
 
@@ -844,20 +832,6 @@ def my_results():
     enriched = enrich_feedback(feedback, cases)
     return render_template("my_results.html", feedback=enriched,
                            total_cases=len(cases))
-
-
-@app.route("/api/debug-latest")
-@login_required
-def debug_latest():
-    feedback = get_feedback()
-    if not feedback:
-        return jsonify({"error": "no feedback"})
-    latest = feedback[-1]
-    return jsonify({
-        "case_id": latest.get("case_id"),
-        "annotator_id": latest.get("annotator_id"),
-        "clinician_annotation": latest.get("clinician_annotation"),
-    })
 
 
 @app.route("/api/export")

@@ -595,7 +595,6 @@ async function submitFeedback() {
     }))},
     time_on_task_seconds:Math.round((Date.now()-startTime)/1000),
   };
-  console.log('[MedEval] submit payload clinician_annotation:', JSON.stringify(payload.clinician_annotation, null, 2));
   try {
     const res=await fetch('/api/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     if(res.ok){showMsg('Feedback saved!','success');setTimeout(()=>window.location.href='/',900);}

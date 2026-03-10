@@ -48,7 +48,9 @@
           </div>
           {% if not readonly %}
           <div class="roi-toolbar">
-            <span class="roi-hint" id="roiHint">Select a nodule below, then draw a ROI on the image</span>
+            <button id="btnDraw" class="roi-btn active" onclick="setTool('draw')">✜ Draw ROI</button>
+            <button class="roi-btn" onclick="clearCurrentDraw()">✕ Cancel draw</button>
+            <span class="roi-hint" id="roiHint">Select a nodule below, then drag to mark ROI</span>
           </div>
           {% endif %}
         </div>
@@ -197,6 +199,7 @@ let activeNoduleId = null; // which nodule is currently being drawn into
 // Drawing state
 let roiDrawing   = false;
 let roiStart     = null;
+let currentTool  = 'draw';
 let draftRoi     = null; // roi being drawn right now (before mouseup)
 
 // ── Image preload ─────────────────────────────────────────────────────────────
@@ -218,12 +221,12 @@ function drawSlice(canvas, sliceIdx, modelIdx) {
   const ctx = canvas.getContext('2d');
   ctx.drawImage(img, 0, 0, size, size);
   if (modelIdx !== null) drawModelBox(ctx, size, sliceIdx, modelIdx);
-  // Draw clinician ROIs on every canvas view
-  nodules.forEach(n => {
-    n.rois.filter(r => r.slice === sliceIdx).forEach(r => drawRoiBox(ctx, size, r, n, n.id === activeNoduleId));
-  });
-  if (canvas.id === 'ctCanvasSingle' && draftRoi && draftRoi.slice === sliceIdx) {
-    drawDraftRoi(ctx, size, draftRoi);
+  // Draw all nodule ROIs for this slice (single view only)
+  if (canvas.id === 'ctCanvasSingle') {
+    nodules.forEach(n => {
+      n.rois.filter(r => r.slice === sliceIdx).forEach(r => drawRoiBox(ctx, size, r, n, n.id === activeNoduleId));
+    });
+    if (draftRoi && draftRoi.slice === sliceIdx) drawDraftRoi(ctx, size, draftRoi);
   }
 }
 
@@ -356,7 +359,7 @@ function renderNoduleList() {
     } else {
       const empty = document.createElement('p');
       empty.className = 'nodule-roi-empty';
-      empty.textContent = 'No ROIs yet — select this nodule and draw a ROI on the image. You can assign multiple ROIs to a nodule';
+      empty.textContent = 'No ROIs yet — select this nodule and drag on the image';
       card.appendChild(empty);
     }
 
@@ -399,7 +402,7 @@ function buildLunaFields(n) {
   ];
   return fields.map(f => `
     <div class="luna-field ${f.opts.length > 4 ? '' : ''}">
-      <label class="luna-label">${f.label}${f.scale ? ` <span class="luna-scale">(${f.scale})</span>` : ''}</label>
+      <label class="luna-label">${f.label}${f.scale?` <span class="luna-scale">(${f.scale})</span>`:''}}</label>
       <div class="luna-scale-btns">
         ${f.opts.map(([v,lbl])=>`
           <button class="luna-btn${n.chars[f.key]===v?' luna-btn-active':''}" data-val="${v}"
@@ -430,20 +433,15 @@ function initRoiDrawing() {
   canvas.style.cursor = 'crosshair';
 
   canvas.addEventListener('mousedown', e => {
-    // Only draw when a nodule is active; left button only
-    if (!activeNoduleId || e.button !== 0) return;
-    e.preventDefault();
+    if (currentTool !== 'draw' || !activeNoduleId) return;
     const r = canvas.getBoundingClientRect();
     roiDrawing = true;
     roiStart   = { sx:(e.clientX-r.left)/r.width, sy:(e.clientY-r.top)/r.height };
     draftRoi   = null;
   });
 
-  // mousemove on document so drags that leave the canvas still track
-  document.addEventListener('mousemove', e => {
+  canvas.addEventListener('mousemove', e => {
     if (!roiDrawing) return;
-    const canvas = document.getElementById('ctCanvasSingle');
-    if (!canvas) return;
     const r = canvas.getBoundingClientRect();
     const ex=(e.clientX-r.left)/r.width, ey=(e.clientY-r.top)/r.height;
     draftRoi = { slice:currentSlice,
@@ -452,9 +450,7 @@ function initRoiDrawing() {
     render();
   });
 
-  // mouseup on document so releasing outside canvas still commits
-  document.addEventListener('mouseup', e => {
-    if (!roiDrawing) return;
+  canvas.addEventListener('mouseup', () => {
     roiDrawing = false;
     if (draftRoi && draftRoi.w > 0.01 && draftRoi.h > 0.01) {
       const n = nodules.find(n => n.id === activeNoduleId);
@@ -466,6 +462,11 @@ function initRoiDrawing() {
     draftRoi = null;
     render();
   });
+}
+
+function setTool(tool) {
+  currentTool = tool;
+  document.getElementById('btnDraw').classList.toggle('active', tool==='draw');
 }
 
 function clearCurrentDraw() {
@@ -496,29 +497,23 @@ function renderStructuredReport(output) {
 }
 
 // ── Render ────────────────────────────────────────────────────────────────────
-// Always redraws ALL canvases so ROIs appear in every view immediately
 function render() {
-  // Single-model view
-  const modelForSingle = (activeModel === 'compare') ? 0 : activeModel;
-  const cSingle = document.getElementById('ctCanvasSingle');
-  if (cSingle) drawSlice(cSingle, currentSlice, modelForSingle);
-  if (activeModel !== 'compare') {
+  if (activeModel === 'compare') {
+    OUTPUTS.forEach((_, mi) => {
+      const c = document.getElementById(`ctCanvasCompare${mi}`);
+      if (c) drawSlice(c, currentSlice, mi);
+      updateConfBadge(`confBadgeCompare${mi}`, currentSlice, mi);
+      const ctr = document.getElementById(`sliceCounterCompare${mi}`);
+      if (ctr) ctr.textContent = `${currentSlice+1} / ${SLICES.length}`;
+      const sl = document.getElementById(`sliderCompare${mi}`); if(sl) sl.value = currentSlice;
+      const zc = document.getElementById(`zCounterCompare${mi}`); if(zc) zc.textContent = `${currentSlice+1}/${SLICES.length}`;
+    });
+  } else {
+    const c = document.getElementById('ctCanvasSingle'); if(c) drawSlice(c, currentSlice, activeModel);
     updateConfBadge('confBadgeSingle', currentSlice, activeModel);
     const ctr = document.getElementById('sliceCounterSingle'); if(ctr) ctr.textContent = `${currentSlice+1} / ${SLICES.length}`;
-    const sl  = document.getElementById('sliderSingle');       if(sl)  sl.value = currentSlice;
+    const sl = document.getElementById('sliderSingle'); if(sl) sl.value = currentSlice;
   }
-
-  // Compare view — always draw so ROIs propagate there too
-  OUTPUTS.forEach((_, mi) => {
-    const c = document.getElementById(`ctCanvasCompare${mi}`);
-    if (c) drawSlice(c, currentSlice, mi);
-    if (activeModel === 'compare') {
-      updateConfBadge(`confBadgeCompare${mi}`, currentSlice, mi);
-      const ctr = document.getElementById(`sliceCounterCompare${mi}`); if(ctr) ctr.textContent = `${currentSlice+1} / ${SLICES.length}`;
-      const sl  = document.getElementById(`sliderCompare${mi}`);       if(sl)  sl.value = currentSlice;
-      const zc  = document.getElementById(`zCounterCompare${mi}`);     if(zc)  zc.textContent = `${currentSlice+1}/${SLICES.length}`;
-    }
-  });
 }
 
 function updateConfBadge(id, sliceIdx, modelIdx) {
@@ -563,7 +558,7 @@ function toggleFlag(btn) {
 // ── Wheel scroll on viewer wraps ──────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   document.querySelectorAll('.ct-viewer-wrap').forEach(el => {
-    el.addEventListener('wheel', e => { e.preventDefault(); goToSlice(currentSlice+(e.deltaY>0?-1:1)); }, {passive:false});
+    el.addEventListener('wheel', e => { e.preventDefault(); goToSlice(currentSlice+(e.deltaY>0?1:-1)); }, {passive:false});
   });
   initRoiDrawing();
 });
@@ -573,29 +568,14 @@ async function submitFeedback() {
   if (preferred===null) { showMsg('Please select a preferred model output.','error'); return; }
   const btn=document.getElementById('submitBtn'); btn.disabled=true; btn.textContent='Saving…';
   OUTPUTS.forEach((_,i)=>{ const ta=document.getElementById(`comments_${i}`); if(ta) modelFeedback[i].comments=ta.value; });
-
-  // Flush any location inputs that may not have fired oninput (autofill, paste, etc.)
-  document.querySelectorAll('.nodule-location').forEach(input => {
-    const id = parseInt(input.dataset.nodule);
-    const n  = nodules.find(n => n.id === id);
-    if (n) n.location = input.value;
-  });
-
   const payload = {
     case_id:CASE_ID, type:CASE_TYPE, preferred, ratings:{}, ranking:[],
     model_feedback:modelFeedback,
     flags:Object.values(modelFeedback).flatMap(m=>m.flags),
     comments:Object.entries(modelFeedback).map(([i,m])=>m.comments?`${OUTPUTS[i].label}: ${m.comments}`:'').filter(Boolean).join(' | '),
-    clinician_annotation: { nodules: nodules.map(n => ({
-      id:       n.id,
-      label:    n.label,
-      location: n.location,
-      chars:    n.chars,
-      rois:     n.rois,
-    }))},
+    clinician_annotation: { nodules },
     time_on_task_seconds:Math.round((Date.now()-startTime)/1000),
   };
-  console.log('[MedEval] submit payload clinician_annotation:', JSON.stringify(payload.clinician_annotation, null, 2));
   try {
     const res=await fetch('/api/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     if(res.ok){showMsg('Feedback saved!','success');setTimeout(()=>window.location.href='/',900);}

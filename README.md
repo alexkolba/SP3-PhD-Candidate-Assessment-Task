@@ -3,8 +3,6 @@
 A containerised web frontend for collecting structured human preference data on
 clinical LLM outputs. Built for preference optimisation (RLHF / DPO) pipelines.
 
-CT images are case courtesy of Frank Gaillard, [Radiopaedia](https://radiopaedia.org/?lang=us). From the case [rID: 8524](https://radiopaedia.org/cases/8524?lang=us)
-
 ---
 
 ## Quick Start (Windows 10)
