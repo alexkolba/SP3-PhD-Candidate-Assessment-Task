@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}All Results — MedEval{% endblock %}
+{% block title %}All Results — DECIPHER-M{% endblock %}
 {% block content %}
 <div class="results-page">
   <div class="results-header">
@@ -92,8 +92,8 @@
             {% endfor %}
             {% if ms.avg_iaa is not none %}
             <div class="model-stat-row">
-              <span class="msr-label">Inter-annotator agreement</span>
-              <span class="msr-val {% if ms.avg_iaa >= 75 %}accent{% elif ms.avg_iaa < 50 %}msr-warn{% endif %}">{{ ms.avg_iaa }}%</span>
+              <span class="msr-label">Avg Fleiss κ (IAA)</span>
+              <span class="msr-val {% if ms.avg_iaa >= 0.6 %}accent{% elif ms.avg_iaa < 0.2 %}msr-warn{% endif %}">{{ ms.avg_iaa }}</span>
             </div>
             {% endif %}
             {% if ms.avg_iou is not none %}

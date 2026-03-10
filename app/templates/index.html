@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Annotation Queue — MedEval{% endblock %}
+{% block title %}Annotation Queue — DECIPHER-M{% endblock %}
 {% block content %}
 
 <div class="hero">
@@ -50,6 +50,7 @@
         <span class="case-type-badge type-{{ case.type }}">{{ case.type }}</span>
         {% if is_done %}<span class="done-badge">✓ Done</span>{% endif %}
       </div>
+      {% if case.title is defined %}<p class="case-title-label">{{ case.title }}</p>{% endif %}
       <p class="case-prompt">{{ case.prompt[:140] }}…</p>
       <div class="case-footer">
         <span class="case-outputs-count">{{ case.outputs | length }} model output{{ 's' if case.outputs | length > 1 }}</span>

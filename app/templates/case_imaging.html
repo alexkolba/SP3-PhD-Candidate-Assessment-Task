@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}{{ case.specialty }} — {{ case.modality }} — MedEval{% endblock %}
+{% block title %}{{ case.specialty }} — {{ case.modality }} — DECIPHER-M{% endblock %}
 
 {% block content %}
 <div class="case-page">
@@ -53,7 +53,8 @@
           {% endif %}
         </div>
 
-        {# Vertical Z-slider directly to the right of canvas #}
+        {# Vertical Z-slider directly to the right of canvas — hidden for single-image modalities #}
+        {% if case.slices | length > 1 %}
         <div class="z-slider-col">
           <span class="z-label">Z</span>
           <input type="range" id="sliderSingle" class="slice-slider-v"
@@ -62,6 +63,7 @@
           <span class="z-counter" id="sliceCounterSingle">1 / {{ case.slices | length }}</span>
           <span class="scroll-hint-v">↕ scroll</span>
         </div>
+        {% endif %}
       </div>
 
       {# Report sidebar #}
@@ -86,12 +88,14 @@
               <span class="slice-counter" id="sliceCounterCompare{{ loop.index0 }}">1 / {{ case.slices | length }}</span>
             </div>
           </div>
+          {% if case.slices | length > 1 %}
           <div class="compare-z-col">
             <input type="range" id="sliderCompare{{ loop.index0 }}" class="slice-slider-v"
               min="0" max="{{ case.slices | length - 1 }}" value="0"
               oninput="goToSlice(parseInt(this.value))">
             <span class="z-counter" id="zCounterCompare{{ loop.index0 }}" style="font-size:.6rem">1/{{ case.slices|length }}</span>
           </div>
+          {% endif %}
         </div>
         <div class="compare-report-structured" id="compareReport{{ loop.index0 }}"></div>
       </div>
@@ -104,7 +108,7 @@
   <div class="luna-form-wrap">
     <h3 class="form-section-title">
       Clinician Annotation
-      <span class="form-section-sub">Add one nodule per suspected lesion. Draw ROIs on individual slices within each nodule.</span>
+      <span class="form-section-sub">Add one nodule per suspected lesion. Draw ROIs on {% if case.slices | length > 1 %}individual slices within each nodule{% else %}the image{% endif %}.</span>
     </h3>
 
     <div id="noduleList" class="nodule-list"></div>
@@ -141,6 +145,37 @@
       {% endfor %}
     </div>
 
+    {% if case.type == "ranking" %}
+    <div class="imaging-pref-group" style="margin-top:1.5rem">
+      <p class="flag-label">Rank model outputs (1 = best):</p>
+      <div style="display:flex; flex-direction:column; gap:.4rem; margin-top:.5rem; max-width:480px;">
+        {% for output in case.outputs %}
+        <div style="display:flex; align-items:center; gap:.75rem; padding:.5rem .75rem;
+                    background:var(--bg-1); border:1px solid var(--border); border-radius:6px;
+                    border-left:3px solid {{ output.color }};">
+          <span style="flex:1; font-size:.83rem; color:var(--text-2);">
+            <span style="font-family:'DM Mono',monospace; font-weight:700; color:{{ output.color }};">{{ output.label }}</span>
+            — {{ output.model }}
+          </span>
+          <div class="rank-select-wrap">
+            <label class="rank-select-label">Rank</label>
+            <select class="rank-select-dropdown" id="imgRankSelect_{{ loop.index0 }}"
+              data-model-idx="{{ loop.index0 }}"
+              onchange="onImgRankChange()">
+              <option value="">—</option>
+              {% for r in range(1, case.outputs|length + 1) %}
+              <option value="{{ r }}">{{ r }}{% if r == 1 %}st{% elif r == 2 %}nd{% elif r == 3 %}rd{% else %}th{% endif %}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      <div id="imgRankingValidation" class="ranking-validation hidden" style="margin-top:.5rem">
+        <span id="imgRankingValidationMsg"></span>
+      </div>
+    </div>
+    {% else %}
     <div class="imaging-pref-group" style="margin-top:1.5rem">
       <p class="flag-label">Overall preference:</p>
       <div class="imaging-pref-btns">
@@ -156,6 +191,7 @@
         </button>
       </div>
     </div>
+    {% endif %}
 
     <div class="form-actions" style="margin-top:1.25rem">
       <a href="/" class="btn-secondary">Cancel</a>
@@ -169,7 +205,8 @@
 
 <script>
 const CASE_ID    = {{ case.id | tojson }};
-const CASE_TYPE  = "comparison";
+const CASE_TYPE  = {{ case.type | tojson }};
+const MODALITY   = {{ case.modality | tojson }};
 const SLICES     = {{ case.slices | tojson }};
 const FOLDER     = {{ case.case_folder | tojson }};
 const OUTPUTS    = {{ case.outputs | tojson }};
@@ -185,6 +222,7 @@ const PX_TO_MM = 0.698;
 let currentSlice  = 0;
 let activeModel   = 0;
 let preferred     = null;
+let imgRanking    = Array.from({length: NUM_MODELS}, (_, i) => i); // default order
 let modelFeedback = Object.fromEntries(OUTPUTS.map((_, i) => [i, { flags: [], comments: "" }]));
 let images        = [];
 
@@ -195,9 +233,10 @@ let noduleCounter = 0;
 let activeNoduleId = null; // which nodule is currently being drawn into
 
 // Drawing state
-let roiDrawing   = false;
-let roiStart     = null;
-let draftRoi     = null; // roi being drawn right now (before mouseup)
+let roiDrawing      = false;
+let roiStart        = null;
+let roiActiveCanvas = null;
+let draftRoi        = null; // roi being drawn right now (before mouseup)
 
 // ── Image preload ─────────────────────────────────────────────────────────────
 function preloadImages() {
@@ -213,16 +252,18 @@ function preloadImages() {
 function drawSlice(canvas, sliceIdx, modelIdx) {
   const img = images[sliceIdx];
   if (!img) return;
-  const size = canvas.parentElement.clientWidth || 500;
+  // Use offsetWidth so we get the actual rendered CSS size; fall back to 500 only
+  // when the canvas is genuinely visible (non-zero). Skip if hidden (offsetWidth=0).
+  const size = canvas.offsetWidth || canvas.parentElement.offsetWidth;
+  if (!size) return;   // canvas is hidden — skip to avoid 0×0 corruption
   canvas.width = size; canvas.height = size;
   const ctx = canvas.getContext('2d');
   ctx.drawImage(img, 0, 0, size, size);
   if (modelIdx !== null) drawModelBox(ctx, size, sliceIdx, modelIdx);
-  // Draw clinician ROIs on every canvas view
   nodules.forEach(n => {
     n.rois.filter(r => r.slice === sliceIdx).forEach(r => drawRoiBox(ctx, size, r, n, n.id === activeNoduleId));
   });
-  if (canvas.id === 'ctCanvasSingle' && draftRoi && draftRoi.slice === sliceIdx) {
+  if (roiActiveCanvas === canvas && draftRoi && draftRoi.slice === sliceIdx) {
     drawDraftRoi(ctx, size, draftRoi);
   }
 }
@@ -373,12 +414,14 @@ function renderNoduleList() {
     `;
     card.appendChild(locRow);
 
-    // LUNA16 chars
-    const chars = document.createElement('div');
-    chars.className = 'luna-grid' ;
-    chars.style.marginTop = '.65rem';
-    chars.innerHTML = buildLunaFields(n);
-    card.appendChild(chars);
+    // LUNA16 chars — CT only
+    if (MODALITY !== 'Chest X-Ray') {
+      const chars = document.createElement('div');
+      chars.className = 'luna-grid';
+      chars.style.marginTop = '.65rem';
+      chars.innerHTML = buildLunaFields(n);
+      card.appendChild(chars);
+    }
 
     container.appendChild(card);
   });
@@ -425,43 +468,51 @@ function setNoduleChar(id, field, val, btn) {
 
 // ── ROI Drawing ───────────────────────────────────────────────────────────────
 function initRoiDrawing() {
-  const canvas = document.getElementById('ctCanvasSingle');
-  if (!canvas || READONLY) return;
-  canvas.style.cursor = 'crosshair';
+  if (READONLY) return;
 
-  canvas.addEventListener('mousedown', e => {
-    // Only draw when a nodule is active; left button only
-    if (!activeNoduleId || e.button !== 0) return;
-    e.preventDefault();
-    const r = canvas.getBoundingClientRect();
-    roiDrawing = true;
-    roiStart   = { sx:(e.clientX-r.left)/r.width, sy:(e.clientY-r.top)/r.height };
-    draftRoi   = null;
+  // Attach drawing to a single canvas element
+  function attachCanvas(canvas) {
+    canvas.style.cursor = 'crosshair';
+    canvas.addEventListener('mousedown', e => {
+      if (!activeNoduleId || e.button !== 0) return;
+      e.preventDefault();
+      const r = canvas.getBoundingClientRect();
+      roiDrawing  = true;
+      roiActiveCanvas = canvas;
+      roiStart    = { sx:(e.clientX-r.left)/r.width, sy:(e.clientY-r.top)/r.height };
+      draftRoi    = null;
+    });
+  }
+
+  // Single-view canvas
+  const cSingle = document.getElementById('ctCanvasSingle');
+  if (cSingle) attachCanvas(cSingle);
+
+  // Compare-view canvases (may be hidden at init but still exist in DOM)
+  OUTPUTS.forEach((_, mi) => {
+    const c = document.getElementById(`ctCanvasCompare${mi}`);
+    if (c) attachCanvas(c);
   });
 
-  // mousemove on document so drags that leave the canvas still track
+  // mousemove/mouseup on document — track whichever canvas started the drag
   document.addEventListener('mousemove', e => {
-    if (!roiDrawing) return;
-    const canvas = document.getElementById('ctCanvasSingle');
-    if (!canvas) return;
-    const r = canvas.getBoundingClientRect();
-    const ex=(e.clientX-r.left)/r.width, ey=(e.clientY-r.top)/r.height;
-    draftRoi = { slice:currentSlice,
-      x:Math.min(roiStart.sx,ex), y:Math.min(roiStart.sy,ey),
-      w:Math.abs(ex-roiStart.sx), h:Math.abs(ey-roiStart.sy) };
+    if (!roiDrawing || !roiActiveCanvas) return;
+    const r = roiActiveCanvas.getBoundingClientRect();
+    const ex = (e.clientX - r.left) / r.width;
+    const ey = (e.clientY - r.top)  / r.height;
+    draftRoi = { slice: currentSlice,
+      x: Math.min(roiStart.sx, ex), y: Math.min(roiStart.sy, ey),
+      w: Math.abs(ex - roiStart.sx), h: Math.abs(ey - roiStart.sy) };
     render();
   });
 
-  // mouseup on document so releasing outside canvas still commits
-  document.addEventListener('mouseup', e => {
+  document.addEventListener('mouseup', () => {
     if (!roiDrawing) return;
     roiDrawing = false;
+    roiActiveCanvas = null;
     if (draftRoi && draftRoi.w > 0.01 && draftRoi.h > 0.01) {
       const n = nodules.find(n => n.id === activeNoduleId);
-      if (n) {
-        n.rois.push({ ...draftRoi });
-        renderNoduleList();
-      }
+      if (n) { n.rois.push({ ...draftRoi }); renderNoduleList(); }
     }
     draftRoi = null;
     render();
@@ -566,11 +617,42 @@ document.addEventListener('DOMContentLoaded', () => {
     el.addEventListener('wheel', e => { e.preventDefault(); goToSlice(currentSlice+(e.deltaY>0?-1:1)); }, {passive:false});
   });
   initRoiDrawing();
+  initImgRanking();
 });
+
+// ── Ranking dropdowns (imaging ranking task) ──────────────────────────────────
+function onImgRankChange() {
+  const selects = Array.from(document.querySelectorAll('.rank-select-dropdown[id^="imgRankSelect_"]'));
+  const changed = selects.find(s => s === document.activeElement) || selects[0];
+  const val = changed.value;
+  // Clear duplicate selections
+  if (val !== '') selects.forEach(s => { if (s !== changed && s.value === val) s.value = ''; });
+  // Rebuild imgRanking array
+  const rankToModel = {};
+  selects.forEach(s => { if (s.value !== '') rankToModel[parseInt(s.value)] = parseInt(s.dataset.modelIdx); });
+  imgRanking = Array.from({length: NUM_MODELS}, (_, i) =>
+    rankToModel[i + 1] !== undefined ? rankToModel[i + 1] : null);
+  // Update validation indicator
+  const assigned = selects.filter(s => s.value !== '').length;
+  const el  = document.getElementById('imgRankingValidation');
+  const msg = document.getElementById('imgRankingValidationMsg');
+  if (el && msg) {
+    if (assigned === NUM_MODELS) { el.className = 'ranking-validation valid'; msg.textContent = '✓ All models ranked'; }
+    else { el.className = 'ranking-validation'; msg.textContent = `${assigned} of ${NUM_MODELS} models ranked`; }
+    el.classList.remove('hidden');
+  }
+}
+
+function initImgRanking() {
+  // nothing needed — dropdowns work via onchange
+}
 
 // ── Submit ────────────────────────────────────────────────────────────────────
 async function submitFeedback() {
-  if (preferred===null) { showMsg('Please select a preferred model output.','error'); return; }
+  // Validation: comparison needs preferred; ranking is always ready (default order counts)
+  if (CASE_TYPE === 'comparison' && preferred === null) {
+    showMsg('Please select a preferred model output.', 'error'); return;
+  }
   const btn=document.getElementById('submitBtn'); btn.disabled=true; btn.textContent='Saving…';
   OUTPUTS.forEach((_,i)=>{ const ta=document.getElementById(`comments_${i}`); if(ta) modelFeedback[i].comments=ta.value; });
 
@@ -582,7 +664,10 @@ async function submitFeedback() {
   });
 
   const payload = {
-    case_id:CASE_ID, type:CASE_TYPE, preferred, ratings:{}, ranking:[],
+    case_id:CASE_ID, type:CASE_TYPE,
+    preferred: CASE_TYPE === 'comparison' ? preferred : null,
+    ranking:   CASE_TYPE === 'ranking'    ? imgRanking : [],
+    ratings:{},
     model_feedback:modelFeedback,
     flags:Object.values(modelFeedback).flatMap(m=>m.flags),
     comments:Object.entries(modelFeedback).map(([i,m])=>m.comments?`${OUTPUTS[i].label}: ${m.comments}`:'').filter(Boolean).join(' | '),
@@ -595,7 +680,7 @@ async function submitFeedback() {
     }))},
     time_on_task_seconds:Math.round((Date.now()-startTime)/1000),
   };
-  console.log('[MedEval] submit payload clinician_annotation:', JSON.stringify(payload.clinician_annotation, null, 2));
+  console.log('[DECIPHER-M] submit payload clinician_annotation:', JSON.stringify(payload.clinician_annotation, null, 2));
   try {
     const res=await fetch('/api/feedback',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
     if(res.ok){showMsg('Feedback saved!','success');setTimeout(()=>window.location.href='/',900);}
@@ -610,6 +695,14 @@ function roundRect(ctx,x,y,w,h,r){ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x
 // ── Restore existing ──────────────────────────────────────────────────────────
 if (EXISTING) {
   if (EXISTING.preferred!=null){const b=document.querySelector(`.imaging-pref-btn[data-idx="${EXISTING.preferred}"]`);if(b)selectImagePreferred(EXISTING.preferred,b);}
+  if (EXISTING.ranking && EXISTING.ranking.length) {
+    imgRanking = EXISTING.ranking;
+    imgRanking.forEach((modelIdx, rankPos) => {
+      const sel = document.getElementById(`imgRankSelect_${modelIdx}`);
+      if (sel) sel.value = String(rankPos + 1);
+    });
+    onImgRankChange();
+  }
   if (EXISTING.model_feedback){
     Object.entries(EXISTING.model_feedback).forEach(([mi,mf])=>{
       modelFeedback[mi]=mf;
