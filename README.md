@@ -17,10 +17,12 @@ clinical LLM outputs. Built for preference optimisation (RLHF / DPO) pipelines.
 docker compose up --build
 ```
 
-Then open your browser at: **http://localhost:5000**
+Then open your browser at: **http://localhost:8080**
 
 To stop: `Ctrl+C`, then `docker compose down`
 
+
+Invite code for creating an admin account: admin1234
 ---
 
 ## Features
@@ -77,9 +79,9 @@ Rebuild after changes: `docker compose up --build`
 
 ## Data Reset
 
-Visit **http://localhost:5000** and click "Reset all feedback" at the bottom,
+Visit **http://localhost:8080** and click "Reset all feedback" at the bottom,
 or call the API directly:
 
 ```
-curl -X POST http://localhost:5000/api/reset
+curl -X POST http://localhost:8080/api/reset
 ```
