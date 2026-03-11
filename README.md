@@ -245,3 +245,4 @@ From the case [rID: 17945](https://radiopaedia.org/cases/17945?lang=us).
 **CT Thorax** (`cases/lung_ct_001/`):
 Case courtesy of Frank Gaillard, [Radiopaedia.org](https://radiopaedia.org/?lang=us).
 From the case [rID: 8524](https://radiopaedia.org/cases/8524?lang=us).
+
