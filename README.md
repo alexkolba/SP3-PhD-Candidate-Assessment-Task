@@ -226,7 +226,7 @@ Rebuild after any changes: `docker compose up --build`
 
 ## Data Reset
 
-From the home page, click **↺ Reset all feedback** (removes your own submissions).
+When logged in to an admin account, from the home page, click **↺ Reset all feedback** (removes all submissions).
 
 Admin reset via API:
 
