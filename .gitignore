@@ -21,9 +21,6 @@ data/
 *.sqlite
 *.sqlite3
 
-# ── Case images (large binary assets, distribute separately) ─────
-cases/
-
 # ── OS ───────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
